@@ -1,26 +1,42 @@
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import Sidebar from "./components/Sidebar";
-import Alerts from "./pages/Alerts";
-import Reports from "./pages/Reports";
-import SensorSettings from "./pages/SensorSettings";
-import HistoricalData from "./pages/HistoricalData";
-import Dashboard from "./pages/Dashboard";
+import React, { useState } from 'react';
+import Sidebar from './components/Sidebar.jsx';
+import Dashboard from './pages/Dashboard.jsx';
+import Alerts from './pages/Alerts.jsx';
+import Reports from './pages/Reports.jsx';
+import HistoricalData from './pages/HistoricalData.jsx';
+import SensorSettings from './pages/SensorSettings.jsx';
+import Settings from './pages/Settings.jsx';
 import './App.css';
 
 function App() {
+  const [activeTab, setActiveTab] = useState('dashboard');
+
+  const renderContent = () => {
+    switch(activeTab) {
+      case 'dashboard':
+        return <Dashboard />;
+      case 'alerts':
+        return <Alerts />;
+      case 'reports':
+        return <Reports />;
+      case 'historical':
+        return <HistoricalData />;
+      case 'sensor-settings':
+        return <SensorSettings />;
+      case 'settings':
+        return <Settings />;
+      default:
+        return <Dashboard />;
+    }
+  };
+
   return (
-    <Router>
-      <Sidebar />
-      <div className="ml-64">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/alerts" element={<Alerts />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/sensor-settings" element={<SensorSettings />} />
-          <Route path="/historical-data" element={<HistoricalData />} />
-        </Routes>
+    <div className="app">
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <div className="main-content">
+        {renderContent()}
       </div>
-    </Router>
+    </div>
   );
 }
 
