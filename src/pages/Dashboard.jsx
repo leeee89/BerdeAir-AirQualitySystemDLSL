@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 
 const Dashboard = () => {
   return (
@@ -13,7 +13,7 @@ const Dashboard = () => {
           <button className="logout-btn">Logout</button>
         </div>
       </div>
-      
+
       <div className="dashboard-content">
         <div className="metrics-cards">
           <div className="metric-card pm25">
@@ -24,7 +24,7 @@ const Dashboard = () => {
               <span>PM2.5</span>
             </div>
           </div>
-          
+
           <div className="metric-card pm10">
             <div className="metric-icon">💨</div>
             <div className="metric-value">38</div>
@@ -33,7 +33,7 @@ const Dashboard = () => {
               <span>PM10</span>
             </div>
           </div>
-          
+
           <div className="metric-card co2">
             <div className="metric-icon">☁️</div>
             <div className="metric-value">1048</div>
@@ -43,7 +43,7 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
-        
+
         <div className="dashboard-grid">
           <div className="campus-map-section">
             <h3>🏫 Campus Sensor Map</h3>
@@ -53,7 +53,7 @@ const Dashboard = () => {
               </div>
             </div>
           </div>
-          
+
           <div className="notifications-section">
             <h3>⚠️ Notifications</h3>
             <div className="notifications-content">
@@ -64,7 +64,7 @@ const Dashboard = () => {
                   <p>Main Building, 2nd Floor - 1048 ppm at 2:05 PM</p>
                 </div>
               </div>
-              
+
               <div className="notification-item warning">
                 <span className="notification-dot yellow"></span>
                 <div>
@@ -72,7 +72,7 @@ const Dashboard = () => {
                   <p>Library - 38 µg/m³ at 1:58 PM</p>
                 </div>
               </div>
-              
+
               <div className="notification-item good">
                 <span className="notification-dot green"></span>
                 <div>
@@ -80,18 +80,18 @@ const Dashboard = () => {
                   <p>Gym - 17 µg/m³ at 1:43 PM</p>
                 </div>
               </div>
-              
+
               <button className="view-all-btn">View All →</button>
             </div>
           </div>
-          
+
           <div className="chart-section">
             <h3>📊 PM2.5 - Last 7 Days</h3>
             <div className="chart-placeholder">
               <p>PM2.5 trend chart will be rendered here</p>
             </div>
           </div>
-          
+
           <div className="chart-section">
             <h3>📊 CO₂ - Last 7 Days</h3>
             <div className="chart-placeholder">
