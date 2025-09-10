@@ -63,10 +63,10 @@ const HistoricalData = () => {
   const locations = [
     'All Locations',
     'Main Gate',
-    'Sport Complex', 
+    'Sports Complex', 
     'Gym',
-    'CREAM Gate Entrance',
-    'Library',
+    'CBEAM Gate Entrance',
+    'Side Gate',
     'Main Building'
   ];
 
