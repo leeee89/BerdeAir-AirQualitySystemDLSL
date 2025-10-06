@@ -1,122 +1,128 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import '../css/SensorSettings.css';
+import { supabase } from '../Database';
 
 const SensorSettings = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('Name (A-Z)');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Sample sensor data
-  const [sensors, setSensors] = useState([
-    {
-      id: 'DLSL-S001',
-      name: 'Main Gate',
-      status: 'Active',
-      isActive: true,
-      thresholds: {
-        pm25: 50,
-        pm10: 70,
-        co2: 1000
-      }
-    },
-    {
-      id: 'DLSL-S002',
-      name: 'Sport Complex',
-      status: 'Active',
-      isActive: true,
-      thresholds: {
-        pm25: 55,
-        pm10: 75,
-        co2: 1050
-      }
-    },
-    {
-      id: 'DLSL-S003',
-      name: 'CBEAM Gate Entrance',
-      status: 'Inactive',
-      isActive: false,
-      thresholds: {
-        pm25: 60,
-        pm10: 80,
-        co2: 1100
-      }
-    }
-  ]);
+  // Live sensors from DB (mapped to your UI shape)
+  const [sensors, setSensors] = useState([]);
+  const [filteredSensors, setFilteredSensors] = useState([]);
 
-  const [filteredSensors, setFilteredSensors] = useState(sensors);
+  // Fetch devices from Supabase
+  useEffect(() => {
+    const fetchDevices = async () => {
+      try {
+        setError(null);
+        setLoading(true);
+
+        const { data, error } = await supabase
+          .from('Arduino devices') // table name with space, as provided
+          .select('device_id, device_name, location');
+
+        if (error) throw error;
+
+        // Map to your UI shape; keep defaults for fields not in DB
+        const mapped = (data || []).map((row) => ({
+          id: row.device_id,
+          name: row.device_name || 'Unnamed Device',
+          location: row.location || '—',
+          status: 'Active',
+          isActive: true,
+          thresholds: {
+            pm25: null,
+            pm10: null,
+            co2: null,
+          },
+        }));
+
+        setSensors(mapped);
+        setFilteredSensors(mapped);
+      } catch (e) {
+        console.error('Failed to load sensors:', e.message);
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDevices();
+  }, []);
 
   const handleSearch = (query) => {
     setSearchQuery(query);
-    filterAndSortSensors(query, sortBy);
   };
 
   const handleSort = (sortOption) => {
     setSortBy(sortOption);
-    filterAndSortSensors(searchQuery, sortOption);
   };
 
-  const filterAndSortSensors = (query, sortOption) => {
-    let filtered = sensors.filter(sensor =>
-      sensor.name.toLowerCase().includes(query.toLowerCase()) ||
-      sensor.id.toLowerCase().includes(query.toLowerCase())
-    );
+  // Filter + sort (derived whenever inputs change)
+  const visibleSensors = useMemo(() => {
+    let list = [...sensors];
 
-    // Sort the filtered results
-    switch (sortOption) {
+    // Filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((s) =>
+        (s.name || '').toLowerCase().includes(q) ||
+        (s.id || '').toLowerCase().includes(q) ||
+        (s.location || '').toLowerCase().includes(q)
+      );
+    }
+
+    // Sort
+    switch (sortBy) {
       case 'Name (A-Z)':
-        filtered.sort((a, b) => a.name.localeCompare(b.name));
+        list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         break;
       case 'Name (Z-A)':
-        filtered.sort((a, b) => b.name.localeCompare(a.name));
+        list.sort((a, b) => (b.name || '').localeCompare(a.name || ''));
         break;
       case 'Status':
-        filtered.sort((a, b) => {
+        list.sort((a, b) => {
           if (a.isActive && !b.isActive) return -1;
           if (!a.isActive && b.isActive) return 1;
-          return a.name.localeCompare(b.name);
+          return (a.name || '').localeCompare(b.name || '');
         });
         break;
       case 'Location':
-        filtered.sort((a, b) => a.name.localeCompare(b.name));
+        list.sort((a, b) => (a.location || '').localeCompare(b.location || ''));
         break;
       default:
         break;
     }
 
-    setFilteredSensors(filtered);
-  };
+    return list;
+  }, [sensors, searchQuery, sortBy]);
+
+  // Keep filteredSensors in sync (only if you still need the state)
+  useEffect(() => {
+    setFilteredSensors(visibleSensors);
+  }, [visibleSensors]);
 
   const toggleSensorStatus = (sensorId) => {
-    const updatedSensors = sensors.map(sensor => {
-      if (sensor.id === sensorId) {
-        return {
-          ...sensor,
-          isActive: !sensor.isActive,
-          status: !sensor.isActive ? 'Active' : 'Inactive'
-        };
-      }
-      return sensor;
-    });
-    
-    setSensors(updatedSensors);
-    filterAndSortSensors(searchQuery, sortBy);
+    // Local-only toggle for now (no DB column yet)
+    const updated = sensors.map((s) =>
+      s.id === sensorId
+        ? { ...s, isActive: !s.isActive, status: !s.isActive ? 'Active' : 'Inactive' }
+        : s
+    );
+    setSensors(updated);
   };
 
   const handleEdit = (sensorId) => {
-    console.log(`Editing sensor: ${sensorId}`);
-    alert(`Edit sensor ${sensorId} - Feature to be implemented`);
+    alert(`Edit sensor ${sensorId} - (DB fields: device_name, location)\n\nTip: We can add an "Edit" dialog to update these fields in Supabase via .update().`);
   };
 
   const handleAddSensor = () => {
-    console.log('Adding new sensor');
-    alert('Add new sensor - Feature to be implemented');
+    alert('Add new sensor - We can show a form to insert into "Arduino devices" via .insert({ device_id, device_name, location })');
   };
 
-  const sortOptions = [
-    'Name (A-Z)',
-    'Name (Z-A)',
-    'Status',
-    'Location'
-  ];
+  const sortOptions = ['Name (A-Z)', 'Name (Z-A)', 'Status', 'Location'];
 
   return (
     <div className="page-content">
@@ -126,6 +132,7 @@ const SensorSettings = () => {
           <p>Configure Deployed Sensors – De La Salle Lipa Campus</p>
         </div>
         <div className="header-right">
+          {loading && <span className="updating-text">Loading…</span>}
           <button className="notification-btn">🔔</button>
           <button className="logout-btn">Logout</button>
         </div>
@@ -142,12 +149,10 @@ const SensorSettings = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => handleSearch(e.target.value)}
-                placeholder="Sensor name or location..."
+                placeholder="Sensor name, ID, or location…"
                 className="search-input"
               />
-              <button className="search-btn" type="button">
-                🔍
-              </button>
+              <button className="search-btn" type="button">🔍</button>
             </div>
           </div>
 
@@ -159,17 +164,14 @@ const SensorSettings = () => {
               onChange={(e) => handleSort(e.target.value)}
               className="sort-select"
             >
-              {sortOptions.map(option => (
+              {sortOptions.map((option) => (
                 <option key={option} value={option}>{option}</option>
               ))}
             </select>
           </div>
         </div>
 
-        <button 
-          className="add-sensor-btn"
-          onClick={handleAddSensor}
-        >
+        <button className="add-sensor-btn" onClick={handleAddSensor}>
           ➕ Add Sensor
         </button>
       </div>
@@ -181,15 +183,14 @@ const SensorSettings = () => {
             <div key={sensor.id} className="sensor-card">
               <div className="sensor-card-header">
                 <div className="sensor-info">
-                  <div className="sensor-icon">
-                    📡
-                  </div>
+                  <div className="sensor-icon">📡</div>
                   <div className="sensor-details">
                     <h3 className="sensor-id">{sensor.id}</h3>
                     <p className="sensor-name">{sensor.name}</p>
+                    <p className="sensor-location">📍 {sensor.location}</p>
                   </div>
                 </div>
-                <button 
+                <button
                   className="edit-btn"
                   onClick={() => handleEdit(sensor.id)}
                   title="Edit Sensor"
@@ -218,24 +219,36 @@ const SensorSettings = () => {
               <div className="thresholds-section">
                 <div className="threshold-item">
                   <span className="threshold-label">PM2.5 Threshold:</span>
-                  <span className="threshold-value">{sensor.thresholds.pm25} μg/m³</span>
+                  <span className="threshold-value">
+                    {sensor.thresholds.pm25 ?? '—'} {sensor.thresholds.pm25 ? 'μg/m³' : ''}
+                  </span>
                 </div>
                 <div className="threshold-item">
                   <span className="threshold-label">PM10 Threshold:</span>
-                  <span className="threshold-value">{sensor.thresholds.pm10} μg/m³</span>
+                  <span className="threshold-value">
+                    {sensor.thresholds.pm10 ?? '—'} {sensor.thresholds.pm10 ? 'μg/m³' : ''}
+                  </span>
                 </div>
                 <div className="threshold-item">
                   <span className="threshold-label">CO₂ Threshold:</span>
-                  <span className="threshold-value">{sensor.thresholds.co2} ppm</span>
+                  <span className="threshold-value">
+                    {sensor.thresholds.co2 ?? '—'} {sensor.thresholds.co2 ? 'ppm' : ''}
+                  </span>
                 </div>
               </div>
             </div>
           ))}
         </div>
 
-        {filteredSensors.length === 0 && (
+        {!loading && !error && filteredSensors.length === 0 && (
           <div className="no-sensors">
             <p>No sensors found matching your search criteria.</p>
+          </div>
+        )}
+
+        {error && (
+          <div className="no-sensors">
+            <p>Error loading sensors: {error}</p>
           </div>
         )}
       </div>

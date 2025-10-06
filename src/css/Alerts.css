@@ -1,4 +1,39 @@
 /* Alerts Page Styles */
+/* Refresh + Updating Indicator Styles */
+.alerts-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.refresh-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.refresh-button {
+  padding: 8px 16px;
+  background-color: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s ease;
+}
+
+.refresh-button:hover {
+  background-color: #1d4ed8;
+}
+
+.updating-text {
+  font-size: 14px;
+  color: #6b7280;
+  font-style: italic;
+}
+
 .alerts-filters {
   background: white;
   border-radius: 12px;

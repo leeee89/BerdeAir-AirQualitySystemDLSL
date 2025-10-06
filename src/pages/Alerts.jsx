@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import "../css/Alerts.css";
+import { supabase } from "../Database";
 
 const Alerts = () => {
   const [filters, setFilters] = useState({
@@ -8,66 +9,103 @@ const Alerts = () => {
     pollutant: "All",
   });
   const [realTimeNotifications, setRealTimeNotifications] = useState(true);
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
+  const refreshIntervalRef = useRef(null);
 
-  // Sample alerts data
-  const [alerts] = useState([
-    {
-      id: 1,
-      type: "CO₂",
-      location: "Main Gate",
-      date: "2024-05-22",
-      time: "19:44",
-      severity: "UNHEALTHY",
-      message: "Unhealthy - CO₂ reached 1048 ppm. Immediate action required.",
-      icon: "🏭",
-      color: "red",
-    },
-    {
-      id: 2,
-      type: "PM10",
-      location: "Sports Complex",
-      date: "2024-05-22",
-      time: "19:20",
-      severity: "MODERATE",
-      message: "Moderate - PM10 at 38 μg/m³. Caution advised.",
-      icon: "💨",
-      color: "yellow",
-    },
-    {
-      id: 3,
-      type: "PM2.5",
-      location: "Side Gate",
-      date: "2024-05-22",
-      time: "12:58",
-      severity: "GOOD",
-      message: "Good - PM2.5 at 17 μg/m³. Air quality is healthy.",
-      icon: "🌱",
-      color: "green",
-    },
-    {
-      id: 4,
-      type: "CO₂",
-      location: "CBEAM Gate Entrance",
-      date: "2024-05-21",
-      time: "17:35",
-      severity: "UNHEALTHY",
-      message: "Unhealthy - CO₂ peaked at 1150 ppm. Please ventilate area.",
-      icon: "🏭",
-      color: "red",
-    },
-    {
-      id: 5,
-      type: "PM10",
-      location: "CBEAM Gate Entrance",
-      date: "2024-05-21",
-      time: "15:55",
-      severity: "MODERATE",
-      message: "Moderate - PM10 at 27 μg/m³. Caution advised.",
-      icon: "💨",
-      color: "yellow",
-    },
-  ]);
+  // 🧭 Fetch data from Supabase
+  const fetchData = async () => {
+    try {
+      if (alerts.length > 0) {
+        setRefreshing(true); // show “refreshing…” but don’t blank out the page
+      } else {
+        setLoading(true);
+      }
 
+      const { data, error } = await supabase
+        .from("air_quality_readings")
+        .select("*")
+        .order("timestamp", { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+
+      // 🧮 Derive severity and pollutant info
+      const processed = data.map((row) => {
+        const pollutants = [
+          { type: "PM2.5", value: row.pm2_5 },
+          { type: "PM10", value: row.pm10 },
+          { type: "CO", value: row.co },
+          { type: "SO₂", value: row.so2 },
+          { type: "NOx", value: row.nox },
+        ];
+
+        const dominant = pollutants.reduce((prev, curr) =>
+          curr.value > (prev?.value || 0) ? curr : prev
+        );
+
+        let severity = "GOOD";
+        let color = "green";
+
+        if (dominant.value > 200) {
+          severity = "UNHEALTHY";
+          color = "red";
+        } else if (dominant.value > 50) {
+          severity = "MODERATE";
+          color = "yellow";
+        }
+
+        return {
+          id: row.reading_id,
+          type: dominant.type,
+          value: dominant.value,
+          location: row.device_id || "Unknown",
+          date: new Date(row.timestamp).toLocaleDateString(),
+          time: new Date(row.timestamp).toLocaleTimeString(),
+          severity,
+          message: `${severity} - ${dominant.type} reached ${dominant.value ?? 0}.`,
+          icon:
+            dominant.type === "CO"
+              ? "🏭"
+              : dominant.type === "PM10"
+              ? "💨"
+              : "🌱",
+          color,
+        };
+      });
+
+      setAlerts(processed);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // 🕒 Auto-refresh setup
+  const startAutoRefresh = () => {
+    clearInterval(refreshIntervalRef.current);
+    refreshIntervalRef.current = setInterval(() => {
+      fetchData();
+    }, 30000); // 30 seconds
+  };
+
+  useEffect(() => {
+    fetchData();
+    startAutoRefresh();
+    return () => clearInterval(refreshIntervalRef.current);
+  }, []);
+
+  // 🧩 Manual refresh (resets timer)
+  const handleManualRefresh = () => {
+    fetchData();
+    startAutoRefresh();
+  };
+
+  // 🧩 Filters
   const handleFilterChange = (filterType, value) => {
     setFilters((prev) => ({
       ...prev,
@@ -76,15 +114,11 @@ const Alerts = () => {
   };
 
   const filteredAlerts = alerts.filter((alert) => {
-    if (filters.severity !== "All" && alert.severity !== filters.severity) {
+    if (filters.severity !== "All" && alert.severity !== filters.severity)
       return false;
-    }
-    if (filters.pollutant !== "All" && alert.type !== filters.pollutant) {
+    if (filters.pollutant !== "All" && alert.type !== filters.pollutant)
       return false;
-    }
-    if (filters.date && alert.date !== filters.date) {
-      return false;
-    }
+    if (filters.date && alert.date !== filters.date) return false;
     return true;
   });
 
@@ -101,9 +135,10 @@ const Alerts = () => {
     }
   };
 
-  const getAlertCardClass = (color) => {
-    return `alert-card alert-${color}`;
-  };
+  const getAlertCardClass = (color) => `alert-card alert-${color}`;
+
+  if (loading) return <p>Loading alerts...</p>;
+  if (error) return <p>Error: {error}</p>;
 
   return (
     <div className="page-content">
@@ -113,12 +148,19 @@ const Alerts = () => {
           <p>Real-Time Air Quality Alerts - De La Salle Lipa</p>
         </div>
         <div className="header-right">
+          <button
+            className={`refresh-btn ${refreshing ? "refreshing" : ""}`}
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+          >
+            {refreshing ? "⟳ Refreshing..." : "⟳ Refresh"}
+          </button>
           <button className="notification-btn">🔔</button>
           <button className="logout-btn">Logout</button>
         </div>
       </div>
 
-      {/* Filters Section */}
+      {/* Filters */}
       <div className="alerts-filters">
         <div className="filter-group">
           <label htmlFor="date-filter">Date</label>
@@ -128,7 +170,6 @@ const Alerts = () => {
             value={filters.date}
             onChange={(e) => handleFilterChange("date", e.target.value)}
             className="filter-input"
-            placeholder="mm/dd/yyyy"
           />
         </div>
 
@@ -158,7 +199,9 @@ const Alerts = () => {
             <option value="All">All</option>
             <option value="PM2.5">PM2.5</option>
             <option value="PM10">PM10</option>
-            <option value="CO₂">CO₂</option>
+            <option value="CO">CO</option>
+            <option value="SO₂">SO₂</option>
+            <option value="NOx">NOx</option>
           </select>
         </div>
 
@@ -176,7 +219,7 @@ const Alerts = () => {
         </div>
       </div>
 
-      {/* Triggered Alerts Section */}
+      {/* Alerts Section */}
       <div className="alerts-section">
         <h2 className="section-title">
           <span className="warning-icon">⚠️</span>
@@ -199,7 +242,6 @@ const Alerts = () => {
                     <span className="alert-time">{alert.time}</span>
                   </div>
                 </div>
-
                 <p className="alert-message">{alert.message}</p>
               </div>
 
