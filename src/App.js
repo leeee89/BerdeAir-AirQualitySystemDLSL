@@ -6,15 +6,17 @@ import Reports from './pages/Reports.jsx';
 import HistoricalData from './pages/HistoricalData.jsx';
 import SensorSettings from './pages/SensorSettings.jsx';
 import Settings from './pages/Settings.jsx';
+import Login from './pages/Login.jsx';
 import './App.css';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [loggedIn, setLoggedIn] = useState(false);
 
   const renderContent = () => {
-    switch(activeTab) {
+    switch (activeTab) {
       case 'dashboard':
-        return <Dashboard />;
+        return <Dashboard onLogout={() => setLoggedIn(false)} />;
       case 'alerts':
         return <Alerts />;
       case 'reports':
@@ -26,16 +28,18 @@ function App() {
       case 'settings':
         return <Settings />;
       default:
-        return <Dashboard />;
+        return <Dashboard onLogout={() => setLoggedIn(false)} />;
     }
   };
+
+  if (!loggedIn) {
+    return <Login onLoginSuccess={() => setLoggedIn(true)} />;
+  }
 
   return (
     <div className="app">
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
-      <div className="main-content">
-        {renderContent()}
-      </div>
+      <div className="main-content">{renderContent()}</div>
     </div>
   );
 }
