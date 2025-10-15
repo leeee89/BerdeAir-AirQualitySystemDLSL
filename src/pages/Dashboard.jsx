@@ -76,6 +76,25 @@ const Dashboard = () => {
     );
   }
 
+import React, { useState } from "react";
+import "../css/popup.css";
+
+const Dashboard = ({ onLogout }) => {
+  const [showLogoutPopup, setShowLogoutPopup] = useState(false);
+
+  const handleLogoutClick = () => {
+    setShowLogoutPopup(true);
+  };
+
+  const confirmLogout = () => {
+    setShowLogoutPopup(false);
+    onLogout();
+  };
+
+  const cancelLogout = () => {
+    setShowLogoutPopup(false);
+  };
+
   return (
     <div className="page-content">
       <div className="page-header">
@@ -87,8 +106,30 @@ const Dashboard = () => {
           {refreshing && <span className="updating-text">Updating…</span>}
           <button className="notification-btn" title="Notifications">🔔</button>
           <button className="logout-btn">Logout</button>
+          <button className="notification-btn">🔔</button>
+          <button className="logout-btn" onClick={handleLogoutClick}>
+            Logout
+          </button>
         </div>
       </div>
+
+      {/* Logout Confirmation Popup */}
+      {showLogoutPopup && (
+        <div className="popup-overlay">
+          <div className="popup-box">
+            <h3>Confirm Logout</h3>
+            <p>Are you sure you want to log out?</p>
+            <div className="popup-buttons">
+              <button className="confirm-btn" onClick={confirmLogout}>
+                Yes, Logout
+              </button>
+              <button className="cancel-btn" onClick={cancelLogout}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="dashboard-content">
         {/* Metric cards (now live) */}
