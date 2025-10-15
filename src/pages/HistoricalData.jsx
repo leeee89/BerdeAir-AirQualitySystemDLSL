@@ -1,176 +1,74 @@
-import React, { useEffect, useMemo, useState } from "react";
-import "../css/HistoricalData.css";
-import { supabase } from "../Database";
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  CartesianGrid,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-} from "recharts";
-
-const toStartOfDayISO = (d) => {
-  const dt = new Date(d);
-  dt.setHours(0, 0, 0, 0);
-  return dt.toISOString();
-};
-
-const toEndOfDayISO = (d) => {
-  const dt = new Date(d);
-  dt.setHours(23, 59, 59, 999);
-  return dt.toISOString();
-};
+import React, { useState } from 'react';
+import '../css/HistoricalData.css';
 
 const HistoricalData = () => {
-  // Filters
   const [filters, setFilters] = useState({
-    startDate: "2024-05-16",
-    endDate: "2024-05-22",
-    location: "All Locations",
+    startDate: '2024-05-16',
+    endDate: '2024-05-22',
+    location: 'All Locations'
   });
 
-  // Data & UI state
-  const [rawRows, setRawRows] = useState([]);
-  const [locations, setLocations] = useState(["All Locations"]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(null);
+  // Sample summary statistics data
+  const [summaryStats] = useState([
+    {
+      type: 'PM2.5',
+      icon: '🌱',
+      avg: 32,
+      peak: 61,
+      unit: 'μg/m³',
+      color: 'green'
+    },
+    {
+      type: 'PM10',
+      icon: '💨',
+      avg: 44,
+      peak: 90,
+      unit: 'μg/m³',
+      color: 'yellow'
+    },
+    {
+      type: 'CO₂',
+      icon: '☁️',
+      avg: 898,
+      peak: 1240,
+      unit: 'ppm',
+      color: 'blue'
+    }
+  ]);
 
-  const handleFilterChange = (key, value) => {
-    setFilters((prev) => ({ ...prev, [key]: value }));
+  // Sample trend data for the chart
+  const [trendData] = useState([
+    { date: '2024-05-16', pm25: 25, pm10: 35, co2: 820 },
+    { date: '2024-05-17', pm25: 45, pm10: 55, co2: 1200 },
+    { date: '2024-05-18', pm25: 38, pm10: 48, co2: 950 },
+    { date: '2024-05-19', pm25: 28, pm10: 38, co2: 880 },
+    { date: '2024-05-20', pm25: 42, pm10: 52, co2: 1050 },
+    { date: '2024-05-21', pm25: 35, pm10: 45, co2: 780 },
+    { date: '2024-05-22', pm25: 30, pm10: 40, co2: 850 }
+  ]);
+
+  const handleFilterChange = (filterType, value) => {
+    setFilters(prev => ({
+      ...prev,
+      [filterType]: value
+    }));
   };
-
-  // Fetch distinct device_ids for location dropdown (once)
-  useEffect(() => {
-    const fetchLocations = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("air_quality_readings")
-          .select("device_id")
-          .not("device_id", "is", null);
-
-        if (error) throw error;
-        const unique = Array.from(new Set((data || []).map((r) => r.device_id))).sort();
-        setLocations(["All Locations", ...unique]);
-      } catch (e) {
-        console.error("Failed to load locations:", e.message);
-      }
-    };
-    fetchLocations();
-  }, []);
-
-  // Fetch rows whenever filters change
-  useEffect(() => {
-    const fetchBetween = async () => {
-      try {
-        setError(null);
-        if (rawRows.length) setRefreshing(true);
-        else setLoading(true);
-
-        const startISO = toStartOfDayISO(filters.startDate);
-        const endISO = toEndOfDayISO(filters.endDate);
-
-        let query = supabase
-          .from("air_quality_readings")
-          .select("timestamp, device_id, pm2_5, pm10, co")
-          .gte("timestamp", startISO)
-          .lte("timestamp", endISO)
-          .order("timestamp", { ascending: true });
-
-        if (filters.location !== "All Locations") {
-          query = query.eq("device_id", filters.location);
-        }
-
-        const { data, error } = await query;
-
-        if (error) throw error;
-        setRawRows(data || []);
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    };
-
-    fetchBetween();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.startDate, filters.endDate, filters.location]);
-
-  // Compute summary stats + trend data
-  const { summaryStats, trendData } = useMemo(() => {
-    // group by YYYY-MM-DD
-    const byDate = new Map();
-
-    rawRows.forEach((r) => {
-      if (!r?.timestamp) return;
-      const d = new Date(r.timestamp);
-      // format to YYYY-MM-DD (local)
-      const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-        d.getDate()
-      ).padStart(2, "0")}`;
-
-      if (!byDate.has(dateKey)) {
-        byDate.set(dateKey, []);
-      }
-      byDate.get(dateKey).push(r);
-    });
-
-    const trend = Array.from(byDate.entries())
-      .sort(([a], [b]) => (a < b ? -1 : 1))
-      .map(([date, rows]) => {
-        const avg = (arr) => (arr.length ? arr.reduce((s, v) => s + (Number(v) || 0), 0) / arr.length : 0);
-        return {
-          date,
-          pm25: avg(rows.map((r) => r.pm2_5)),
-          pm10: avg(rows.map((r) => r.pm10)),
-          co2: avg(rows.map((r) => r.co)), // assuming 'co' = CO₂ (ppm)
-        };
-      });
-
-    const allPM25 = rawRows.map((r) => Number(r.pm2_5) || 0);
-    const allPM10 = rawRows.map((r) => Number(r.pm10) || 0);
-    const allCO2 = rawRows.map((r) => Number(r.co) || 0);
-
-    const avg = (arr) => (arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0);
-    const max = (arr) => (arr.length ? Math.max(...arr) : 0);
-
-    const summary = [
-      {
-        type: "PM2.5",
-        icon: "🌱",
-        avg: Number(avg(allPM25).toFixed(1)),
-        peak: Number(max(allPM25).toFixed(1)),
-        unit: "μg/m³",
-        color: "green",
-      },
-      {
-        type: "PM10",
-        icon: "💨",
-        avg: Number(avg(allPM10).toFixed(1)),
-        peak: Number(max(allPM10).toFixed(1)),
-        unit: "μg/m³",
-        color: "yellow",
-      },
-      {
-        type: "CO₂",
-        icon: "☁️",
-        avg: Number(avg(allCO2).toFixed(0)),
-        peak: Number(max(allCO2).toFixed(0)),
-        unit: "ppm",
-        color: "blue",
-      },
-    ];
-
-    return { summaryStats: summary, trendData: trend };
-  }, [rawRows]);
 
   const handleExport = (format) => {
-    alert(`Export ${format} coming soon ✨`);
+    // Placeholder for export functionality
+    console.log(`Exporting data as ${format}`);
+    alert(`Exporting data as ${format} - Feature to be implemented`);
   };
+
+  const locations = [
+    'All Locations',
+    'Main Gate',
+    'Sports Complex', 
+    'Gym',
+    'CBEAM Gate Entrance',
+    'Side Gate',
+    'Main Building'
+  ];
 
   return (
     <div className="page-content">
@@ -180,7 +78,6 @@ const HistoricalData = () => {
           <p>Analyze Past Air Quality Trends – DLSL Campus</p>
         </div>
         <div className="header-right">
-          {refreshing && <span className="updating-text">Updating…</span>}
           <button className="notification-btn">🔔</button>
           <button className="logout-btn">Logout</button>
         </div>
@@ -196,7 +93,7 @@ const HistoricalData = () => {
                 id="start-date"
                 type="date"
                 value={filters.startDate}
-                onChange={(e) => handleFilterChange("startDate", e.target.value)}
+                onChange={(e) => handleFilterChange('startDate', e.target.value)}
                 className="filter-input date-input"
               />
               <span className="date-separator">–</span>
@@ -204,7 +101,7 @@ const HistoricalData = () => {
                 id="end-date"
                 type="date"
                 value={filters.endDate}
-                onChange={(e) => handleFilterChange("endDate", e.target.value)}
+                onChange={(e) => handleFilterChange('endDate', e.target.value)}
                 className="filter-input date-input"
               />
             </div>
@@ -215,23 +112,27 @@ const HistoricalData = () => {
             <select
               id="location-filter"
               value={filters.location}
-              onChange={(e) => handleFilterChange("location", e.target.value)}
+              onChange={(e) => handleFilterChange('location', e.target.value)}
               className="filter-select location-select"
             >
-              {locations.map((loc) => (
-                <option key={loc} value={loc}>
-                  {loc}
-                </option>
+              {locations.map(location => (
+                <option key={location} value={location}>{location}</option>
               ))}
             </select>
           </div>
         </div>
 
         <div className="export-controls">
-          <button className="export-btn csv-btn" onClick={() => handleExport("CSV")}>
+          <button 
+            className="export-btn csv-btn"
+            onClick={() => handleExport('CSV')}
+          >
             📊 Export CSV
           </button>
-          <button className="export-btn pdf-btn" onClick={() => handleExport("PDF")}>
+          <button 
+            className="export-btn pdf-btn"
+            onClick={() => handleExport('PDF')}
+          >
             📄 Export PDF
           </button>
         </div>
@@ -245,35 +146,28 @@ const HistoricalData = () => {
             <span className="section-icon">📊</span>
             Summary Statistics
           </h2>
-
+          
           <div className="stats-cards">
-            {summaryStats.map((stat, idx) => (
-              <div key={idx} className={`stat-card stat-${stat.color}`}>
-                <div className="stat-icon">{stat.icon}</div>
+            {summaryStats.map((stat, index) => (
+              <div key={index} className={`stat-card stat-${stat.color}`}>
+                <div className="stat-icon">
+                  {stat.icon}
+                </div>
                 <div className="stat-content">
                   <h3 className="stat-type">{stat.type}</h3>
                   <div className="stat-values">
                     <div className="stat-item">
                       <span className="stat-label">Avg:</span>
-                      <span className="stat-value">
-                        {stat.avg} {stat.unit}
-                      </span>
+                      <span className="stat-value">{stat.avg} {stat.unit}</span>
                     </div>
                     <div className="stat-item">
                       <span className="stat-label">Peak:</span>
-                      <span className="stat-value">
-                        {stat.peak} {stat.unit}
-                      </span>
+                      <span className="stat-value">{stat.peak} {stat.unit}</span>
                     </div>
                   </div>
                 </div>
               </div>
             ))}
-            {!rawRows.length && (
-              <div className="no-alerts" style={{ width: "100%" }}>
-                <p>No data for selected filters.</p>
-              </div>
-            )}
           </div>
         </div>
 
@@ -283,24 +177,62 @@ const HistoricalData = () => {
             <span className="section-icon">📈</span>
             Pollutant Trends Over Time
           </h2>
-
+          
           <div className="chart-container">
-            <div className="chart-content" style={{ height: 320 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trendData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  {/* Recharts will use default colors unless you specify; keeping it simple */}
-                  <Line type="monotone" dataKey="co2" name="CO₂ (ppm)" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="pm10" name="PM10 (µg/m³)" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="pm25" name="PM2.5 (µg/m³)" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
+            <div className="chart-placeholder">
+              <div className="chart-content">
+                <div className="sample-chart">
+                  {/* Simple chart representation */}
+                  <div className="chart-y-axis">
+                    <div className="y-label">1,400</div>
+                    <div className="y-label">1,200</div>
+                    <div className="y-label">1,000</div>
+                    <div className="y-label">800</div>
+                    <div className="y-label">600</div>
+                    <div className="y-label">400</div>
+                    <div className="y-label">200</div>
+                    <div className="y-label">0</div>
+                  </div>
+                  
+                  <div className="chart-area">
+                    <svg viewBox="0 0 600 300" className="trend-chart">
+                      {/* CO2 line (blue) */}
+                      <polyline 
+                        points="50,180 120,60 190,120 260,160 330,90 400,200 470,170"
+                        fill="none" 
+                        stroke="#3b82f6" 
+                        strokeWidth="3"
+                      />
+                      {/* PM10 line (yellow) */}
+                      <polyline 
+                        points="50,240 120,220 190,215 260,225 330,210 400,220 470,230"
+                        fill="none" 
+                        stroke="#f59e0b" 
+                        strokeWidth="3"
+                      />
+                      {/* PM2.5 line (green) */}
+                      <polyline 
+                        points="50,250 120,230 190,235 260,245 330,232 400,240 470,245"
+                        fill="none" 
+                        stroke="#10b981" 
+                        strokeWidth="3"
+                      />
+                    </svg>
+                  </div>
+                  
+                  <div className="chart-x-axis">
+                    <div className="x-label">2024-05-16</div>
+                    <div className="x-label">2024-05-17</div>
+                    <div className="x-label">2024-05-18</div>
+                    <div className="x-label">2024-05-19</div>
+                    <div className="x-label">2024-05-20</div>
+                    <div className="x-label">2024-05-21</div>
+                    <div className="x-label">2024-05-22</div>
+                  </div>
+                </div>
+              </div>
             </div>
-
+            
             <div className="chart-legend">
               <div className="legend-item">
                 <span className="legend-color pm25"></span>
@@ -318,9 +250,6 @@ const HistoricalData = () => {
           </div>
         </div>
       </div>
-
-      {loading && <div className="no-alerts"><p>Loading data…</p></div>}
-      {error && <div className="no-alerts"><p>Error: {error}</p></div>}
     </div>
   );
 };
