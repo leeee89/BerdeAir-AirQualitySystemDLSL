@@ -1,3 +1,81 @@
+import React, { useEffect, useState, useRef, useCallback } from "react";
+import { supabase } from "../Database";
+import "../css/Alerts.css"; // keep your existing styles if dashboard CSS is here
+
+const Dashboard = () => {
+  const [metrics, setMetrics] = useState({
+    pm25: null,
+    pm10: null,
+    co2: null,
+    timestamp: null,
+  });
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const hasLoadedRef = useRef(false);
+
+  const fetchLatest = useCallback(async () => {
+    try {
+      if (hasLoadedRef.current) {
+        setRefreshing(true); // subtle “Updating…” without flicker
+      } else {
+        setLoading(true);
+      }
+
+      const { data, error } = await supabase
+        .from("air_quality_readings")
+        .select("timestamp, pm2_5, pm10, co")
+        .order("timestamp", { ascending: false })
+        .limit(1);
+
+      if (error) throw error;
+
+      const row = data && data[0] ? data[0] : null;
+
+      setMetrics({
+        pm25: row?.pm2_5 ?? null,
+        pm10: row?.pm10 ?? null,
+        co2: row?.co ?? null, // assuming 'co' is CO₂ in ppm
+        timestamp: row?.timestamp ?? null,
+      });
+
+      hasLoadedRef.current = true;
+    } catch (e) {
+      console.error("Failed to fetch latest metrics:", e.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLatest(); // initial load
+    const id = setInterval(fetchLatest, 10000); // auto-refresh every 10s
+    return () => clearInterval(id);
+  }, [fetchLatest]);
+
+  const fmt = (v, { decimals = 0 } = {}) =>
+    v === null || v === undefined ? "—" : Number(v).toFixed(decimals);
+
+  const lastUpdated =
+    metrics.timestamp ? new Date(metrics.timestamp).toLocaleString() : "—";
+
+  if (loading) {
+    return (
+      <div className="page-content">
+        <div className="page-header">
+          <div className="header-left">
+            <h1>Dashboard</h1>
+            <p>De La Salle-Lipa Air Quality Monitoring</p>
+          </div>
+          <div className="header-right">
+            <span className="updating-text">Loading…</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
 import React, { useState } from "react";
 import "../css/popup.css";
 
@@ -25,6 +103,9 @@ const Dashboard = ({ onLogout }) => {
           <p>De La Salle-Lipa Air Quality Monitoring</p>
         </div>
         <div className="header-right">
+          {refreshing && <span className="updating-text">Updating…</span>}
+          <button className="notification-btn" title="Notifications">🔔</button>
+          <button className="logout-btn">Logout</button>
           <button className="notification-btn">🔔</button>
           <button className="logout-btn" onClick={handleLogoutClick}>
             Logout
@@ -51,10 +132,11 @@ const Dashboard = ({ onLogout }) => {
       )}
 
       <div className="dashboard-content">
+        {/* Metric cards (now live) */}
         <div className="metrics-cards">
           <div className="metric-card pm25">
             <div className="metric-icon">🌱</div>
-            <div className="metric-value">17</div>
+            <div className="metric-value">{fmt(metrics.pm25, { decimals: 1 })}</div>
             <div className="metric-label">
               <span>µg/m³</span>
               <span>PM2.5</span>
@@ -63,7 +145,7 @@ const Dashboard = ({ onLogout }) => {
 
           <div className="metric-card pm10">
             <div className="metric-icon">💨</div>
-            <div className="metric-value">38</div>
+            <div className="metric-value">{fmt(metrics.pm10, { decimals: 1 })}</div>
             <div className="metric-label">
               <span>µg/m³</span>
               <span>PM10</span>
@@ -72,7 +154,7 @@ const Dashboard = ({ onLogout }) => {
 
           <div className="metric-card co2">
             <div className="metric-icon">☁️</div>
-            <div className="metric-value">1048</div>
+            <div className="metric-value">{fmt(metrics.co2, { decimals: 0 })}</div>
             <div className="metric-label">
               <span>ppm</span>
               <span>CO₂</span>
@@ -80,6 +162,11 @@ const Dashboard = ({ onLogout }) => {
           </div>
         </div>
 
+        <div style={{ margin: "8px 0 24px", color: "#6b7280", fontSize: 12 }}>
+          Last updated: {lastUpdated}
+        </div>
+
+        {/* Keep your existing placeholders/layout */}
         <div className="dashboard-grid">
           <div className="campus-map-section">
             <h3>🏫 Campus Sensor Map</h3>
