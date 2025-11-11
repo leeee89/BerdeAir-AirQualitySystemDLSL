@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+// src/pages/SensorSettings.jsx
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import '../css/SensorSettings.css';
 import { supabase } from '../Database';
 
@@ -12,55 +13,77 @@ const SensorSettings = () => {
   const [sensors, setSensors] = useState([]);
   const [filteredSensors, setFilteredSensors] = useState([]);
 
-  // Fetch devices from Supabase
-  useEffect(() => {
-    const fetchDevices = async () => {
-      try {
-        setError(null);
-        setLoading(true);
+  // Static thresholds (Warning / Danger)
+  const THRESHOLDS = {
+    pm25: { label: 'PM2.5', warning: '>35 µg/m³', danger: '>150 µg/m³' },
+    pm10: { label: 'PM10',  warning: '>100 µg/m³', danger: '>300 µg/m³' },
+    no2:  { label: 'NO₂',   warning: '>100 ppb',   danger: '>650 ppb'   },
+    co:   { label: 'CO',    warning: '>9 ppm',     danger: '>15 ppm'    },
+  };
 
-        const { data, error } = await supabase
-          .from('Arduino devices') // table name with space, as provided
-          .select('device_id, device_name, location');
+  const fetchDevices = useCallback(async () => {
+    try {
+      setError(null);
+      setLoading(true);
 
-        if (error) throw error;
+      // 1) Devices
+      const { data: deviceRows, error: devErr } = await supabase
+        .from('Arduino devices')
+        .select('device_id, device_name, location');
+      if (devErr) throw devErr;
 
-        // Map to your UI shape; keep defaults for fields not in DB
-        const mapped = (data || []).map((row) => ({
+      const deviceIds = (deviceRows ?? [])
+        .map(d => d.device_id)
+        .filter(Boolean);
+
+      // 2) Who is active in the last 10 minutes?
+      const sinceIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+      let activeSet = new Set();
+      if (deviceIds.length > 0) {
+        const { data: recentRows, error: readErr } = await supabase
+          .from('air_quality_readings')
+          .select('device_id, timestamp')
+          .gte('timestamp', sinceIso)
+          .in('device_id', deviceIds);
+        if (readErr) throw readErr;
+
+        activeSet = new Set((recentRows ?? []).map(r => r.device_id));
+      }
+
+      // 3) Map to UI
+      const mapped = (deviceRows ?? []).map((row) => {
+        const isActive = activeSet.has(row.device_id);
+        return {
           id: row.device_id,
           name: row.device_name || 'Unnamed Device',
           location: row.location || '—',
-          status: 'Active',
-          isActive: true,
-          thresholds: {
-            pm25: null,
-            pm10: null,
-            co2: null,
-          },
-        }));
+          status: isActive ? 'Active' : 'Inactive',
+          isActive,
+        };
+      });
 
-        setSensors(mapped);
-        setFilteredSensors(mapped);
-      } catch (e) {
-        console.error('Failed to load sensors:', e.message);
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDevices();
+      setSensors(mapped);
+      setFilteredSensors(mapped);
+    } catch (e) {
+      console.error('Failed to load sensors:', e.message);
+      setError(e.message);
+      setSensors([]);
+      setFilteredSensors([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const handleSearch = (query) => {
-    setSearchQuery(query);
-  };
+  // Initial load
+  useEffect(() => {
+    fetchDevices();
+  }, [fetchDevices]);
 
-  const handleSort = (sortOption) => {
-    setSortBy(sortOption);
-  };
+  const handleSearch = (query) => setSearchQuery(query);
+  const handleSort = (sortOption) => setSortBy(sortOption);
 
-  // Filter + sort (derived whenever inputs change)
+  // Filter + sort
   const visibleSensors = useMemo(() => {
     let list = [...sensors];
 
@@ -99,32 +122,26 @@ const SensorSettings = () => {
     return list;
   }, [sensors, searchQuery, sortBy]);
 
-  // Keep filteredSensors in sync (only if you still need the state)
+  // Sync derived list
   useEffect(() => {
     setFilteredSensors(visibleSensors);
   }, [visibleSensors]);
 
-  const toggleSensorStatus = (sensorId) => {
-    // Local-only toggle for now (no DB column yet)
-    const updated = sensors.map((s) =>
-      s.id === sensorId
-        ? { ...s, isActive: !s.isActive, status: !s.isActive ? 'Active' : 'Inactive' }
-        : s
-    );
-    setSensors(updated);
-  };
-
   const handleEdit = (sensorId) => {
-    alert(`Edit sensor ${sensorId} - (DB fields: device_name, location)\n\nTip: We can add an "Edit" dialog to update these fields in Supabase via .update().`);
+    alert(
+      `Edit sensor ${sensorId}\n\nTip: Implement a dialog to update 'device_name' or 'location' via Supabase .update().`
+    );
   };
 
   const handleAddSensor = () => {
-    alert('Add new sensor - We can show a form to insert into "Arduino devices" via .insert({ device_id, device_name, location })');
+    alert('Add new sensor — show a form to insert into "Arduino devices" via .insert({ device_id, device_name, location })');
   };
 
   const sortOptions = ['Name (A-Z)', 'Name (Z-A)', 'Status', 'Location'];
 
-  return (
+  return {
+    /* JSX below */
+  } && (
     <div className="page-content">
       <div className="page-header">
         <div className="header-left">
@@ -199,40 +216,38 @@ const SensorSettings = () => {
                 </button>
               </div>
 
+              {/* Computed status (last 10 mins), no toggle */}
               <div className="sensor-status-row">
                 <span className="status-label">Status:</span>
-                <div className="status-toggle-wrapper">
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={sensor.isActive}
-                      onChange={() => toggleSensorStatus(sensor.id)}
-                    />
-                    <span className="toggle-slider"></span>
-                  </label>
-                  <span className={`status-text ${sensor.isActive ? 'active' : 'inactive'}`}>
-                    {sensor.status}
-                  </span>
-                </div>
+                <span className={`status-text ${sensor.isActive ? 'active' : 'inactive'}`}>
+                  {sensor.status}
+                </span>
               </div>
 
+              {/* Thresholds (Warning / Danger) */}
               <div className="thresholds-section">
                 <div className="threshold-item">
-                  <span className="threshold-label">PM2.5 Threshold:</span>
+                  <span className="threshold-label">{THRESHOLDS.pm25.label} Thresholds:</span>
                   <span className="threshold-value">
-                    {sensor.thresholds.pm25 ?? '—'} {sensor.thresholds.pm25 ? 'μg/m³' : ''}
+                    Warning {THRESHOLDS.pm25.warning} • Danger {THRESHOLDS.pm25.danger}
                   </span>
                 </div>
                 <div className="threshold-item">
-                  <span className="threshold-label">PM10 Threshold:</span>
+                  <span className="threshold-label">{THRESHOLDS.pm10.label} Thresholds:</span>
                   <span className="threshold-value">
-                    {sensor.thresholds.pm10 ?? '—'} {sensor.thresholds.pm10 ? 'μg/m³' : ''}
+                    Warning {THRESHOLDS.pm10.warning} • Danger {THRESHOLDS.pm10.danger}
                   </span>
                 </div>
                 <div className="threshold-item">
-                  <span className="threshold-label">CO₂ Threshold:</span>
+                  <span className="threshold-label">{THRESHOLDS.no2.label} Thresholds:</span>
                   <span className="threshold-value">
-                    {sensor.thresholds.co2 ?? '—'} {sensor.thresholds.co2 ? 'ppm' : ''}
+                    Warning {THRESHOLDS.no2.warning} • Danger {THRESHOLDS.no2.danger}
+                  </span>
+                </div>
+                <div className="threshold-item">
+                  <span className="threshold-label">{THRESHOLDS.co.label} Thresholds:</span>
+                  <span className="threshold-value">
+                    Warning {THRESHOLDS.co.warning} • Danger {THRESHOLDS.co.danger}
                   </span>
                 </div>
               </div>

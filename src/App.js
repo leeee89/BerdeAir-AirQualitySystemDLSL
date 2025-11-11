@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import Sidebar from './components/Sidebar.jsx';
 
 import Dashboard from './pages/Dashboard.jsx';
-import Alerts from './pages/Alerts.jsx';
+import Alerts from './pages/Alerts.jsx';   
 import Reports from './pages/Reports.jsx';
 import HistoricalData from './pages/HistoricalData.jsx';
 import SensorSettings from './pages/SensorSettings.jsx';

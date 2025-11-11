@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+// src/pages/Reports.jsx
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import '../css/Reports.css';
+import { supabase } from "../Database";
 
 const Reports = () => {
   const [filters, setFilters] = useState({
@@ -9,82 +11,130 @@ const Reports = () => {
     pollutant: 'All'
   });
 
-  // Sample reports data
-  const [reports] = useState([
-    {
-      id: 'REP-20240521-01',
-      dateGenerated: '2024-05-21 13:55',
-      sensorLocation: 'Main Gate',
-      pollutants: ['PM2.5', 'CO₂'],
-      aqiSummary: 'Unhealthy (CO₂: 1048 ppm)',
-      status: 'unhealthy'
-    },
-    {
-      id: 'REP-20240521-02',
-      dateGenerated: '2024-05-21 13:30',
-      sensorLocation: 'Sport Complex',
-      pollutants: ['PM2.5', 'PM10'],
-      aqiSummary: 'Moderate (PM10: 38 μg/m³)',
-      status: 'moderate'
-    },
-    {
-      id: 'REP-20240521-03',
-      dateGenerated: '2024-05-21 13:30',
-      sensorLocation: 'Oval',
-      pollutants: ['PM2.5'],
-      aqiSummary: 'Good (PM2.5: 17 μg/m³)',
-      status: 'good'
-    },
-    {
-      id: 'REP-20240520-01',
-      dateGenerated: '2024-05-20 16:10',
-      sensorLocation: 'CBEAM Gate Entrance',
-      pollutants: ['CO₂', 'PM10'],
-      aqiSummary: 'Unhealthy (CO₂: 1150 ppm)',
-      status: 'unhealthy'
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);     // <-- NEW
+  const [rawReports, setRawReports] = useState([]);
+  const [filteredReports, setFilteredReports] = useState([]);
+  const [locations, setLocations] = useState(['All Locations']);
+
+  const getStatusClass = (status) => `status-indicator ${status || ''}`;
+  const pollutants = useMemo(() => ['All', 'PM2.5', 'PM10', 'CO', 'NO2'], []);
+
+  // ---- Fetcher (now reusable) ----
+  const fetchData = useCallback(async () => {
+    try {
+      // If we already have data, show the "refreshing" state; otherwise show full "loading"
+      setLoading(rawReports.length === 0);
+      setRefreshing(rawReports.length > 0);
+
+      // 1) Pull reports
+      const { data: reportsData, error: reportsErr } = await supabase
+        .from('reports')
+        .select('*');
+      if (reportsErr) throw reportsErr;
+
+      const safeReports = Array.isArray(reportsData) ? reportsData : [];
+
+      // 2) Collect device_ids for join
+      const deviceIds = Array.from(
+        new Set(safeReports.map(r => r.device_id).filter(Boolean))
+      );
+
+      // 3) Pull devices
+      let devicesData = [];
+      if (deviceIds.length > 0) {
+        const { data, error } = await supabase
+          .from('Arduino devices')  // you confirmed no quotes needed
+          .select('device_id, location, device_name')
+          .in('device_id', deviceIds);
+        if (error) throw error;
+        devicesData = data || [];
+      }
+
+      const devicesById = new Map(devicesData.map(d => [d.device_id, d]));
+
+      // 4) Build rows for UI
+      const joined = safeReports.map((rep, idx) => {
+        const device = rep.device_id ? devicesById.get(rep.device_id) : null;
+
+        const whenRaw = rep.report_time || null;
+        const when = whenRaw ? new Date(whenRaw) : null;
+
+        const reportId = rep.report_id;
+        const pollutant = rep.pollutant; // string (e.g., "PM2.5")
+
+        return {
+          id: reportId,
+          dateGenerated: when ? when.toLocaleString() : '—',
+          sensorLocation: device?.location ?? 'Unknown Location',
+          pollutants: pollutant ?? '—', // you’re rendering as plain text in the cell
+          aqiSummary: null,
+          status: '',
+          _deviceFound: !!device
+        };
+      });
+
+      setRawReports(joined);
+      setFilteredReports(joined);
+
+      // Dynamic locations dropdown
+      const uniqueLocs = Array.from(
+        new Set(joined.map(j => j.sensorLocation).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b));
+      setLocations(['All Locations', ...uniqueLocs]);
+    } catch (e) {
+      console.error('Reports fetch error:', e);
+      setRawReports([]);
+      setFilteredReports([]);
+      setLocations(['All Locations']);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-  ]);
+  }, [rawReports.length, supabase]);
 
-  const [filteredReports, setFilteredReports] = useState(reports);
+  // Initial load
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
+  // Manual refresh click
+  const handleManualRefresh = () => {
+    fetchData();
+  };
+
+  // Filters
   const handleFilterChange = (filterType, value) => {
-    setFilters(prev => ({
-      ...prev,
-      [filterType]: value
-    }));
+    setFilters(prev => ({ ...prev, [filterType]: value }));
   };
 
   const applyFilters = () => {
-    let filtered = reports.filter(report => {
-      // Date range filter
-      if (filters.startDate && filters.endDate) {
-        const reportDate = new Date(report.dateGenerated.split(' ')[0]);
-        const startDate = new Date(filters.startDate);
-        const endDate = new Date(filters.endDate);
-        if (reportDate < startDate || reportDate > endDate) {
-          return false;
-        }
+    let filtered = rawReports.filter(report => {
+      // Date range
+      if (filters.startDate && filters.endDate && report.dateGenerated && report.dateGenerated !== '—') {
+        const d = new Date(report.dateGenerated);
+        const start = new Date(filters.startDate);
+        const end = new Date(filters.endDate);
+        end.setHours(23, 59, 59, 999);
+        if (d < start || d > end) return false;
       }
-      
-      // Location filter
-      if (filters.sensorLocation !== 'All Locations' && 
+
+      // Location
+      if (filters.sensorLocation !== 'All Locations' &&
           report.sensorLocation !== filters.sensorLocation) {
         return false;
       }
-      
-      // Pollutant filter
+
+      // Pollutant (your `pollutants` is currently a string in report)
       if (filters.pollutant !== 'All') {
-        const hasPollutant = report.pollutants.some(pollutant => 
-          pollutant.includes(filters.pollutant)
-        );
-        if (!hasPollutant) {
+        if (!report.pollutants || !String(report.pollutants).includes(filters.pollutant)) {
           return false;
         }
       }
-      
+
       return true;
     });
-    
+
     setFilteredReports(filtered);
   };
 
@@ -92,42 +142,6 @@ const Reports = () => {
     console.log(`Downloading report: ${reportId}`);
     alert(`Downloading ${reportId} - Feature to be implemented`);
   };
-
-  const handleNewReport = () => {
-    console.log('Generating new report');
-    alert('Generating new report - Feature to be implemented');
-  };
-
-  const getPollutantBadge = (pollutant) => {
-    const pollutantStyles = {
-      'PM2.5': 'pollutant-badge pm25',
-      'PM10': 'pollutant-badge pm10',
-      'CO₂': 'pollutant-badge co2'
-    };
-    return pollutantStyles[pollutant] || 'pollutant-badge';
-  };
-
-  const getStatusClass = (status) => {
-    return `status-indicator ${status}`;
-  };
-
-  const locations = [
-    'All Locations',
-    'Main Gate',
-    'Sport Complex',
-    'Oval',
-    'CREAM Gate Entrance',
-    'Library',
-    'Main Building',
-    'Gym'
-  ];
-
-  const pollutants = [
-    'All',
-    'PM2.5',
-    'PM10',
-    'CO₂'
-  ];
 
   return (
     <div className="page-content">
@@ -137,6 +151,13 @@ const Reports = () => {
           <p>Comprehensive Air Quality Reports – De La Salle Lipa</p>
         </div>
         <div className="header-right">
+          <button
+            className={`refresh-btn ${refreshing ? "refreshing" : ""}`} // <-- NEW
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+          >
+            {refreshing ? "⟳ Refreshing..." : "⟳ Refresh"}
+          </button>
           <button className="notification-btn">🔔</button>
           <button className="logout-btn">Logout</button>
         </div>
@@ -197,11 +218,12 @@ const Reports = () => {
           </div>
         </div>
 
-        <button 
+        <button
           className="apply-filters-btn"
           onClick={applyFilters}
+          disabled={loading || refreshing}
         >
-          🔍 Apply Filters
+          {(loading || refreshing) ? 'Loading…' : '🔍 Apply Filters'}
         </button>
       </div>
 
@@ -212,12 +234,6 @@ const Reports = () => {
             <span className="section-icon">📊</span>
             Generated Reports
           </h2>
-          <button 
-            className="new-report-btn"
-            onClick={handleNewReport}
-          >
-            ➕ New Report
-          </button>
         </div>
 
         <div className="reports-table-container">
@@ -238,32 +254,17 @@ const Reports = () => {
                   <td className="report-id">
                     <span className="report-id-text">{report.id}</span>
                   </td>
-                  <td className="report-date">
-                    {report.dateGenerated}
-                  </td>
-                  <td className="report-location">
-                    {report.sensorLocation}
-                  </td>
-                  <td className="report-pollutants">
-                    <div className="pollutants-list">
-                      {report.pollutants.map((pollutant, index) => (
-                        <span 
-                          key={index} 
-                          className={getPollutantBadge(pollutant)}
-                        >
-                          {pollutant}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
+                  <td className="report-date">{report.dateGenerated}</td>
+                  <td className="report-location">{report.sensorLocation}</td>
+                  <td className="report-pollutant">{report.pollutants}</td>
                   <td className="report-aqi">
                     <div className="aqi-summary">
                       <span className={getStatusClass(report.status)}></span>
-                      <span className="aqi-text">{report.aqiSummary}</span>
+                      <span className="aqi-text">{report.aqiSummary ?? '—'}</span>
                     </div>
                   </td>
                   <td className="report-download">
-                    <button 
+                    <button
                       className="download-btn"
                       onClick={() => handleDownload(report.id)}
                       title="Download Report"
@@ -276,9 +277,15 @@ const Reports = () => {
             </tbody>
           </table>
 
-          {filteredReports.length === 0 && (
+          {!loading && !refreshing && filteredReports.length === 0 && (
             <div className="no-reports">
               <p>No reports found matching your criteria.</p>
+            </div>
+          )}
+
+          {(loading || refreshing) && (
+            <div className="no-reports">
+              <p>Loading reports…</p>
             </div>
           )}
         </div>

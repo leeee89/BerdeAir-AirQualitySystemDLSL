@@ -6,9 +6,11 @@ const Dashboard = () => {
   const [metrics, setMetrics] = useState({
     pm25: null,
     pm10: null,
-    co2: null,
+    co: null,
+    no2: null,
     timestamp: null,
   });
+  const [recent, setRecent] = useState([]); // 👈 last 3 readings for Notifications
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -17,27 +19,33 @@ const Dashboard = () => {
   const fetchLatest = useCallback(async () => {
     try {
       if (hasLoadedRef.current) {
-        setRefreshing(true); // subtle “Updating…” without flicker
+        setRefreshing(true);
       } else {
         setLoading(true);
       }
 
+      // Get the latest 3 readings (most recent first)
       const { data, error } = await supabase
         .from("air_quality_readings")
-        .select("timestamp, pm2_5, pm10, co")
+        .select("timestamp, pm25_raw, pm10_raw, co_raw, no2_raw")
         .order("timestamp", { ascending: false })
-        .limit(1);
+        .limit(3);
 
       if (error) throw error;
 
-      const row = data && data[0] ? data[0] : null;
+      const latest = data && data[0] ? data[0] : null;
 
+      // Update metric cards with the newest row
       setMetrics({
-        pm25: row?.pm2_5 ?? null,
-        pm10: row?.pm10 ?? null,
-        co2: row?.co ?? null, // assuming 'co' is CO₂ in ppm
-        timestamp: row?.timestamp ?? null,
+        pm25: latest?.pm25_raw ?? null,
+        pm10: latest?.pm10_raw ?? null,
+        co: latest?.co_raw ?? null,
+        no2: latest?.no2_raw ?? null,
+        timestamp: latest?.timestamp ?? null,
       });
+
+      // Update notifications with the top 3 rows
+      setRecent(data ?? []);
 
       hasLoadedRef.current = true;
     } catch (e) {
@@ -59,6 +67,38 @@ const Dashboard = () => {
 
   const lastUpdated =
     metrics.timestamp ? new Date(metrics.timestamp).toLocaleString() : "—";
+
+  // Simple rule-of-thumb severities (tweak to your thresholds)
+  const classify = (row) => {
+    // prioritize the pollutant with “worst” state for the label
+    const flags = [];
+
+    // PM2.5 µg/m³
+    if (row.pm25_raw >= 55.5) flags.push({ key: "PM2.5", level: "danger", value: `${fmt(row.pm25_raw, {decimals:1})} µg/m³` });
+    else if (row.pm25_raw >= 35.5) flags.push({ key: "PM2.5", level: "warning", value: `${fmt(row.pm25_raw, {decimals:1})} µg/m³` });
+    else flags.push({ key: "PM2.5", level: "good", value: `${fmt(row.pm25_raw, {decimals:1})} µg/m³` });
+
+    // PM10 µg/m³
+    if (row.pm10_raw >= 155) flags.push({ key: "PM10", level: "danger", value: `${fmt(row.pm10_raw, {decimals:1})} µg/m³` });
+    else if (row.pm10_raw >= 55) flags.push({ key: "PM10", level: "warning", value: `${fmt(row.pm10_raw, {decimals:1})} µg/m³` });
+    else flags.push({ key: "PM10", level: "good", value: `${fmt(row.pm10_raw, {decimals:1})} µg/m³` });
+
+    // CO ppm (rough illustrative cut-offs)
+    if (row.co_raw >= 1000) flags.push({ key: "CO", level: "danger", value: `${fmt(row.co_raw, {decimals:0})} ppm` });
+    else if (row.co_raw >= 700) flags.push({ key: "CO", level: "warning", value: `${fmt(row.co_raw, {decimals:0})} ppm` });
+    else flags.push({ key: "CO", level: "good", value: `${fmt(row.co_raw, {decimals:0})} ppm` });
+
+    // NO2 ppb (illustrative cut-offs)
+    if (row.no2_raw >= 200) flags.push({ key: "NO₂", level: "danger", value: `${fmt(row.no2_raw, {decimals:0})} ppb` });
+    else if (row.no2_raw >= 100) flags.push({ key: "NO₂", level: "warning", value: `${fmt(row.no2_raw, {decimals:0})} ppb` });
+    else flags.push({ key: "NO₂", level: "good", value: `${fmt(row.no2_raw, {decimals:0})} ppb` });
+
+    // choose worst: danger > warning > good
+    const order = { danger: 3, warning: 2, good: 1 };
+    const worst = flags.sort((a, b) => order[b.level] - order[a.level])[0];
+
+    return worst; // { key, level, value }
+  };
 
   if (loading) {
     return (
@@ -113,10 +153,19 @@ const Dashboard = () => {
 
           <div className="metric-card co2">
             <div className="metric-icon">☁️</div>
-            <div className="metric-value">{fmt(metrics.co2, { decimals: 0 })}</div>
+            <div className="metric-value">{fmt(metrics.co, { decimals: 0 })}</div>
             <div className="metric-label">
               <span>ppm</span>
-              <span>CO₂</span>
+              <span>CO</span>
+            </div>
+          </div>
+
+          <div className="metric-card no2">
+            <div className="metric-icon">☁️</div>
+            <div className="metric-value">{fmt(metrics.no2, { decimals: 0 })}</div>
+            <div className="metric-label">
+              <span>ppb</span>
+              <span>NO2</span>
             </div>
           </div>
         </div>
@@ -125,7 +174,6 @@ const Dashboard = () => {
           Last updated: {lastUpdated}
         </div>
 
-        {/* Keep your existing placeholders/layout */}
         <div className="dashboard-grid">
           <div className="campus-map-section">
             <h3>🏫 Campus Sensor Map</h3>
@@ -136,32 +184,30 @@ const Dashboard = () => {
             </div>
           </div>
 
+          {/* 🔴 Notifications now live from the last 3 readings */}
           <div className="notifications-section">
             <h3>⚠️ Notifications</h3>
             <div className="notifications-content">
-              <div className="notification-item danger">
-                <span className="notification-dot red"></span>
-                <div>
-                  <strong>CO₂ Level Unhealthy</strong>
-                  <p>Main Building, 2nd Floor - 1048 ppm at 2:05 PM</p>
-                </div>
-              </div>
+              {recent.map((row, idx) => {
+                const t = new Date(row.timestamp);
+                const worst = classify(row); // { key, level, value }
+                const dotClass =
+                  worst.level === "danger" ? "red" : worst.level === "warning" ? "yellow" : "green";
+                const itemClass =
+                  worst.level === "danger" ? "danger" : worst.level === "warning" ? "warning" : "good";
 
-              <div className="notification-item warning">
-                <span className="notification-dot yellow"></span>
-                <div>
-                  <strong>PM10 Moderate</strong>
-                  <p>Library - 38 µg/m³ at 1:58 PM</p>
-                </div>
-              </div>
-
-              <div className="notification-item good">
-                <span className="notification-dot green"></span>
-                <div>
-                  <strong>PM2.5 Good</strong>
-                  <p>Gym - 17 µg/m³ at 1:43 PM</p>
-                </div>
-              </div>
+                return (
+                  <div key={idx} className={`notification-item ${itemClass}`}>
+                    <span className={`notification-dot ${dotClass}`}></span>
+                    <div>
+                      <strong>{worst.key} {worst.level === "good" ? "Good" : worst.level === "warning" ? "Elevated" : "Unhealthy"}</strong>
+                      <p>
+                        {worst.value} • {t.toLocaleDateString()} {t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
 
               <button className="view-all-btn">View All →</button>
             </div>

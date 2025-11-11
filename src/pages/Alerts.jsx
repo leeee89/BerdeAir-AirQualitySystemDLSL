@@ -15,14 +15,45 @@ const Alerts = () => {
   const [error, setError] = useState(null);
   const refreshIntervalRef = useRef(null);
 
-  // 🧭 Fetch data from Supabase
+  // Determine severity per pollutant
+  const classifySeverity = (type, value) => {
+    if (type === "PM2.5") {
+      if (value > 150.4) return "UNHEALTHY";
+      if (value > 35.4) return "MODERATE";
+      return "GOOD";
+    } else if (type === "PM10") {
+      if (value > 354) return "UNHEALTHY";
+      if (value > 154) return "MODERATE";
+      return "GOOD";
+    } else if (type === "NO2") {
+      if (value > 650) return "UNHEALTHY";
+      if (value > 100) return "MODERATE";
+      return "GOOD";
+    } else if (type === "CO") {
+      if (value > 15) return "UNHEALTHY";
+      if (value > 9) return "MODERATE";
+      return "GOOD";
+    }
+    return "GOOD";
+  };
+
+  const getColorBySeverity = (severity) => {
+    switch (severity) {
+      case "UNHEALTHY":
+        return "red";
+      case "MODERATE":
+        return "yellow";
+      case "GOOD":
+      default:
+        return "green";
+    }
+  };
+
+  // Fetch data from Supabase
   const fetchData = async () => {
     try {
-      if (alerts.length > 0) {
-        setRefreshing(true); // show “refreshing…” but don’t blank out the page
-      } else {
-        setLoading(true);
-      }
+      setLoading(alerts.length === 0);
+      setRefreshing(alerts.length > 0);
 
       const { data, error } = await supabase
         .from("air_quality_readings")
@@ -32,48 +63,59 @@ const Alerts = () => {
 
       if (error) throw error;
 
-      // 🧮 Derive severity and pollutant info
-      const processed = data.map((row) => {
+      const processed = data.flatMap((row) => {
         const pollutants = [
-          { type: "PM2.5", value: row.pm2_5 },
-          { type: "PM10", value: row.pm10 },
-          { type: "CO", value: row.co },
-          { type: "SO₂", value: row.so2 },
-          { type: "NOx", value: row.nox },
+          { type: "PM2.5", value: row.pm25_raw },
+          { type: "PM10", value: row.pm10_raw },
+          { type: "CO", value: row.co_raw },
+          { type: "NO2", value: row.no2_raw },
         ];
 
-        const dominant = pollutants.reduce((prev, curr) =>
-          curr.value > (prev?.value || 0) ? curr : prev
+        // Only MODERATE or UNHEALTHY pollutants
+        const relevant = pollutants.filter(
+          (p) => classifySeverity(p.type, p.value) !== "GOOD"
         );
 
-        let severity = "GOOD";
-        let color = "green";
-
-        if (dominant.value > 200) {
-          severity = "UNHEALTHY";
-          color = "red";
-        } else if (dominant.value > 50) {
-          severity = "MODERATE";
-          color = "yellow";
+        if (relevant.length === 0) {
+          return [
+            {
+              id: row.reading_id + "-GOOD",
+              type: "All Good",
+              value: null,
+              location: row.device_id || "Unknown",
+              date: new Date(row.timestamp).toLocaleDateString(),
+              time: new Date(row.timestamp).toLocaleTimeString(),
+              severity: "GOOD",
+              message: "All pollutants are within safe levels.",
+              icon: "🌱",
+              color: "green",
+            },
+          ];
         }
 
-        return {
-          id: row.reading_id,
-          type: dominant.type,
-          value: dominant.value,
-          location: row.device_id || "Unknown",
-          date: new Date(row.timestamp).toLocaleDateString(),
-          time: new Date(row.timestamp).toLocaleTimeString(),
-          severity,
-          message: `${severity} - ${dominant.type} reached ${dominant.value ?? 0}.`,
-          icon:
-            dominant.type === "CO"
-              ? "🏭"
-              : dominant.type === "PM10"
-              ? "💨"
-              : "🌱",
-          color,
-        };
+        return relevant.map((p) => {
+          const severity = classifySeverity(p.type, p.value);
+          const color = getColorBySeverity(severity);
+          return {
+            id: row.reading_id + "-" + p.type,
+            type: p.type,
+            value: p.value,
+            location: row.device_id || "Unknown",
+            date: new Date(row.timestamp).toLocaleDateString(),
+            time: new Date(row.timestamp).toLocaleTimeString(),
+            severity,
+            message: `${severity} - ${p.type} reached ${p.value.toFixed(1)}.`,
+            icon:
+              p.type === "CO"
+                ? "🏭"
+                : p.type === "PM10"
+                ? "💨"
+                : p.type === "PM2.5"
+                ? "🌫️"
+                : "🌱",
+            color,
+          };
+        });
       });
 
       setAlerts(processed);
@@ -85,12 +127,38 @@ const Alerts = () => {
     }
   };
 
-  // 🕒 Auto-refresh setup
+  // Send a report
+ const handleReport = async (alert) => {
+  try {
+    // Extract numeric reading_id only
+    const numericReadingId = parseInt(alert.id.split("-")[0], 10);
+
+    const { error } = await supabase.from("reports").insert([
+      {
+        reading_id: numericReadingId,   // numeric only
+        device_id: alert.location,
+        pollutant: alert.type,
+        value: alert.value,
+        severity: alert.severity,
+        report_time: new Date().toISOString(),
+      },
+    ]);
+
+    if (error) throw error;
+    alertUser(`✅ Report for ${alert.type} sent successfully.`);
+  } catch (err) {
+    console.error("Error sending report:", err);
+    alertUser(`❌ Failed to send report: ${err.message}`);
+  }
+};
+
+
+  const alertUser = (msg) => window.alert(msg);
+
+  // Auto-refresh
   const startAutoRefresh = () => {
     clearInterval(refreshIntervalRef.current);
-    refreshIntervalRef.current = setInterval(() => {
-      fetchData();
-    }, 30000); // 30 seconds
+    refreshIntervalRef.current = setInterval(fetchData, 30000);
   };
 
   useEffect(() => {
@@ -99,18 +167,13 @@ const Alerts = () => {
     return () => clearInterval(refreshIntervalRef.current);
   }, []);
 
-  // 🧩 Manual refresh (resets timer)
   const handleManualRefresh = () => {
     fetchData();
     startAutoRefresh();
   };
 
-  // 🧩 Filters
   const handleFilterChange = (filterType, value) => {
-    setFilters((prev) => ({
-      ...prev,
-      [filterType]: value,
-    }));
+    setFilters((prev) => ({ ...prev, [filterType]: value }));
   };
 
   const filteredAlerts = alerts.filter((alert) => {
@@ -200,8 +263,7 @@ const Alerts = () => {
             <option value="PM2.5">PM2.5</option>
             <option value="PM10">PM10</option>
             <option value="CO">CO</option>
-            <option value="SO₂">SO₂</option>
-            <option value="NOx">NOx</option>
+            <option value="NO2">NO₂</option>
           </select>
         </div>
 
@@ -219,18 +281,16 @@ const Alerts = () => {
         </div>
       </div>
 
-      {/* Alerts Section */}
+      {/* Alerts */}
       <div className="alerts-section">
         <h2 className="section-title">
-          <span className="warning-icon">⚠️</span>
-          Triggered Alerts
+          <span className="warning-icon">⚠️</span> Triggered Alerts
         </h2>
 
         <div className="alerts-list">
           {filteredAlerts.map((alert) => (
             <div key={alert.id} className={getAlertCardClass(alert.color)}>
               <div className="alert-icon">{alert.icon}</div>
-
               <div className="alert-content">
                 <div className="alert-header">
                   <div className="alert-type-location">
@@ -244,11 +304,17 @@ const Alerts = () => {
                 </div>
                 <p className="alert-message">{alert.message}</p>
               </div>
-
               <div className="alert-severity">
                 <span className={getSeverityBadgeClass(alert.severity)}>
                   {alert.severity}
                 </span>
+                <button
+                  className="report-btn"
+                  onClick={() => handleReport(alert)}
+                  title="Send this alert to reports"
+                >
+                  📤 Report
+                </button>
               </div>
             </div>
           ))}

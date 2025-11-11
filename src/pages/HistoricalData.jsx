@@ -10,6 +10,7 @@ import {
   YAxis,
   Tooltip,
   Legend,
+  Brush,
 } from "recharts";
 
 const toStartOfDayISO = (d) => {
@@ -24,13 +25,46 @@ const toEndOfDayISO = (d) => {
   return dt.toISOString();
 };
 
+const sameDay = (a, b) => {
+  const A = new Date(a);
+  const B = new Date(b);
+  return (
+    A.getFullYear() === B.getFullYear() &&
+    A.getMonth() === B.getMonth() &&
+    A.getDate() === B.getDate()
+  );
+};
+
+// Round timestamp to the minute for cross-device aggregation
+const minuteKey = (isoOrDate) => {
+  const d = new Date(isoOrDate);
+  d.setSeconds(0, 0);
+  // Keep local time semantics for readability on the chart
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  // Use a sortable key that includes full date for multi-day
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return { key: `${y}-${m}-${day} ${hh}:${mm}`, label: `${hh}:${mm}`, dateKey: `${y}-${m}-${day}` };
+};
+
+const dateKeyOf = (iso) => {
+  const d = new Date(iso);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
 const HistoricalData = () => {
   // Filters
   const [filters, setFilters] = useState({
     startDate: "2024-05-16",
-    endDate: "2024-05-22",
+    endDate: "2024-05-16",
     location: "All Locations",
   });
+  const [aggregateAll, setAggregateAll] = useState(true); // only relevant if All Locations
 
   // Data & UI state
   const [rawRows, setRawRows] = useState([]);
@@ -75,7 +109,7 @@ const HistoricalData = () => {
 
         let query = supabase
           .from("air_quality_readings")
-          .select("timestamp, device_id, pm2_5, pm10, co")
+          .select("*")
           .gte("timestamp", startISO)
           .lte("timestamp", endISO)
           .order("timestamp", { ascending: true });
@@ -85,7 +119,6 @@ const HistoricalData = () => {
         }
 
         const { data, error } = await query;
-
         if (error) throw error;
         setRawRows(data || []);
       } catch (e) {
@@ -100,77 +133,114 @@ const HistoricalData = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.startDate, filters.endDate, filters.location]);
 
-  // Compute summary stats + trend data
-  const { summaryStats, trendData } = useMemo(() => {
-    // group by YYYY-MM-DD
-    const byDate = new Map();
+  // Compute summary stats + chart data
+  const { summaryStats, chartData, xKeyLabel } = useMemo(() => {
+    const rows = rawRows || [];
 
-    rawRows.forEach((r) => {
-      if (!r?.timestamp) return;
-      const d = new Date(r.timestamp);
-      // format to YYYY-MM-DD (local)
-      const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-        d.getDate()
-      ).padStart(2, "0")}`;
+    const avg = (arr) =>
+      arr.length ? arr.reduce((s, v) => s + (Number(v) || 0), 0) / arr.length : 0;
+    const max = (arr) =>
+      arr.length ? Math.max(...arr.map((v) => Number(v) || 0)) : 0;
 
-      if (!byDate.has(dateKey)) {
-        byDate.set(dateKey, []);
-      }
-      byDate.get(dateKey).push(r);
-    });
-
-    const trend = Array.from(byDate.entries())
-      .sort(([a], [b]) => (a < b ? -1 : 1))
-      .map(([date, rows]) => {
-        const avg = (arr) => (arr.length ? arr.reduce((s, v) => s + (Number(v) || 0), 0) / arr.length : 0);
-        return {
-          date,
-          pm25: avg(rows.map((r) => r.pm2_5)),
-          pm10: avg(rows.map((r) => r.pm10)),
-          co2: avg(rows.map((r) => r.co)), // assuming 'co' = CO₂ (ppm)
-        };
-      });
-
-    const allPM25 = rawRows.map((r) => Number(r.pm2_5) || 0);
-    const allPM10 = rawRows.map((r) => Number(r.pm10) || 0);
-    const allCO2 = rawRows.map((r) => Number(r.co) || 0);
-
-    const avg = (arr) => (arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0);
-    const max = (arr) => (arr.length ? Math.max(...arr) : 0);
+    // ---- Summary cards (based on the filtered rows as-is)
+    const allPM25 = rows.map((r) => Number(r.pm25_raw) || 0);
+    const allPM10 = rows.map((r) => Number(r.pm10_raw) || 0);
+    const allCO = rows.map((r) => Number(r.co_raw) || 0);
+    const allNO2 = rows.map((r) => Number(r.no2_raw) || 0);
 
     const summary = [
-      {
-        type: "PM2.5",
-        icon: "🌱",
-        avg: Number(avg(allPM25).toFixed(1)),
-        peak: Number(max(allPM25).toFixed(1)),
-        unit: "μg/m³",
-        color: "green",
-      },
-      {
-        type: "PM10",
-        icon: "💨",
-        avg: Number(avg(allPM10).toFixed(1)),
-        peak: Number(max(allPM10).toFixed(1)),
-        unit: "μg/m³",
-        color: "yellow",
-      },
-      {
-        type: "CO₂",
-        icon: "☁️",
-        avg: Number(avg(allCO2).toFixed(0)),
-        peak: Number(max(allCO2).toFixed(0)),
-        unit: "ppm",
-        color: "blue",
-      },
+      { type: "PM2.5", icon: "🌫️", avg: Number(avg(allPM25).toFixed(1)), peak: Number(max(allPM25).toFixed(1)), unit: "raw", color: "green" },
+      { type: "PM10",  icon: "💨", avg: Number(avg(allPM10).toFixed(1)), peak: Number(max(allPM10).toFixed(1)), unit: "raw", color: "yellow" },
+      { type: "CO",    icon: "☁️", avg: Number(avg(allCO).toFixed(1)),   peak: Number(max(allCO).toFixed(1)),   unit: "raw", color: "blue" },
+      { type: "NO₂",   icon: "🧪", avg: Number(avg(allNO2).toFixed(1)),  peak: Number(max(allNO2).toFixed(1)),  unit: "raw", color: "purple" },
     ];
 
-    return { summaryStats: summary, trendData: trend };
-  }, [rawRows]);
+    // ---- Chart data
+    const singleDay = sameDay(filters.startDate, filters.endDate);
+
+    // If single day: per-reading timeline (or aggregated per minute across devices if All Locations + aggregateAll)
+    if (singleDay) {
+      let points = [];
+
+      if (filters.location === "All Locations" && aggregateAll) {
+        // Group readings of the same minute across all devices
+        const bucket = new Map(); // key => { pm25[], pm10[], co[], no2[], label }
+        rows.forEach((r) => {
+          if (!r?.timestamp) return;
+          const mk = minuteKey(r.timestamp);
+          if (!bucket.has(mk.key)) {
+            bucket.set(mk.key, { pm25: [], pm10: [], co: [], no2: [], label: mk.label });
+          }
+          const b = bucket.get(mk.key);
+          b.pm25.push(Number(r.pm25_raw) || 0);
+          b.pm10.push(Number(r.pm10_raw) || 0);
+          b.co.push(Number(r.co_raw) || 0);
+          b.no2.push(Number(r.no2_raw) || 0);
+        });
+
+        points = Array.from(bucket.entries())
+          .sort(([a], [b]) => (a < b ? -1 : 1))
+          .map(([key, b]) => ({
+            // x-axis label: HH:mm (still unique per minute within a day)
+            time: b.label,
+            pm25: avg(b.pm25),
+            pm10: avg(b.pm10),
+            co: avg(b.co),
+            no2: avg(b.no2),
+          }));
+        return { summaryStats: summary, chartData: points, xKeyLabel: "time" };
+      }
+
+      // Otherwise, just plot each reading for the selected device (or all devices concatenated)
+      points = rows
+        .filter((r) => r?.timestamp)
+        .map((r) => {
+          const d = new Date(r.timestamp);
+          const hh = String(d.getHours()).padStart(2, "0");
+          const mm = String(d.getMinutes()).padStart(2, "0");
+          const label = `${hh}:${mm}`;
+          return {
+            time: label,
+            pm25: Number(r.pm25_raw) || 0,
+            pm10: Number(r.pm10_raw) || 0,
+            co: Number(r.co_raw) || 0,
+            no2: Number(r.no2_raw) || 0,
+            device_id: r.device_id,
+          };
+        })
+        .sort((a, b) => (a.time < b.time ? -1 : 1));
+
+      return { summaryStats: summary, chartData: points, xKeyLabel: "time" };
+    }
+
+    // Multi-day: keep daily aggregation, add Brush for zoom in the chart UI
+    const byDate = new Map();
+    rows.forEach((r) => {
+      if (!r?.timestamp) return;
+      const k = dateKeyOf(r.timestamp);
+      if (!byDate.has(k)) byDate.set(k, []);
+      byDate.get(k).push(r);
+    });
+
+    const daily = Array.from(byDate.entries())
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([date, group]) => ({
+        date,
+        pm25: avg(group.map((r) => r.pm25_raw)),
+        pm10: avg(group.map((r) => r.pm10_raw)),
+        co: avg(group.map((r) => r.co_raw)),
+        no2: avg(group.map((r) => r.no2_raw)),
+      }));
+
+    return { summaryStats: summary, chartData: daily, xKeyLabel: "date" };
+  }, [rawRows, filters.startDate, filters.endDate, filters.location, aggregateAll]);
 
   const handleExport = (format) => {
     alert(`Export ${format} coming soon ✨`);
   };
+
+  const isAllLocations = filters.location === "All Locations";
+  const singleDayRange = sameDay(filters.startDate, filters.endDate);
 
   return (
     <div className="page-content">
@@ -190,7 +260,7 @@ const HistoricalData = () => {
       <div className="historical-filters">
         <div className="filter-controls">
           <div className="filter-group">
-            <label htmlFor="date-range">Date Range</label>
+            <label>Date Range</label>
             <div className="date-range-inputs">
               <input
                 id="start-date"
@@ -225,6 +295,18 @@ const HistoricalData = () => {
               ))}
             </select>
           </div>
+
+          {isAllLocations && (
+            <div className="filter-group">
+              <label htmlFor="aggregate-all">Aggregate across devices</label>
+              <input
+                id="aggregate-all"
+                type="checkbox"
+                checked={aggregateAll}
+                onChange={(e) => setAggregateAll(e.target.checked)}
+              />
+            </div>
+          )}
         </div>
 
         <div className="export-controls">
@@ -281,40 +363,29 @@ const HistoricalData = () => {
         <div className="trends-section">
           <h2 className="section-title">
             <span className="section-icon">📈</span>
-            Pollutant Trends Over Time
+            {singleDayRange ? "Intra-day Pollutant Trends" : "Daily Pollutant Trends"}
           </h2>
 
           <div className="chart-container">
-            <div className="chart-content" style={{ height: 320 }}>
+            <div className="chart-content" style={{ height: 340 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trendData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+                <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
+                  <XAxis dataKey={xKeyLabel} />
                   <YAxis />
                   <Tooltip />
                   <Legend />
-                  {/* Recharts will use default colors unless you specify; keeping it simple */}
-                  <Line type="monotone" dataKey="co2" name="CO₂ (ppm)" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="pm10" name="PM10 (µg/m³)" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="pm25" name="PM2.5 (µg/m³)" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="pm25" name="PM2.5 (raw)" stroke="#4CAF50" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="pm10" name="PM10 (raw)"  stroke="#FFC107" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="co"   name="CO (raw)"    stroke="#2196F3" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="no2"  name="NO₂ (raw)"   stroke="#9C27B0" strokeWidth={2} dot={false} />
+                  {/* Zoom control appears for multi-day ranges */}
+                  {!singleDayRange && <Brush dataKey={xKeyLabel} height={24} travellerWidth={8} />}
                 </LineChart>
               </ResponsiveContainer>
             </div>
 
-            <div className="chart-legend">
-              <div className="legend-item">
-                <span className="legend-color pm25"></span>
-                <span className="legend-label">PM2.5</span>
-              </div>
-              <div className="legend-item">
-                <span className="legend-color pm10"></span>
-                <span className="legend-label">PM10</span>
-              </div>
-              <div className="legend-item">
-                <span className="legend-color co2"></span>
-                <span className="legend-label">CO₂</span>
-              </div>
-            </div>
+  
           </div>
         </div>
       </div>
