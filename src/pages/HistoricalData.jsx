@@ -60,8 +60,8 @@ const dateKeyOf = (iso) => {
 const HistoricalData = () => {
   // Filters
   const [filters, setFilters] = useState({
-    startDate: "2024-05-16",
-    endDate: "2024-05-16",
+  startDate: '',
+    endDate: '',  
     location: "All Locations",
   });
   const [aggregateAll, setAggregateAll] = useState(true); // only relevant if All Locations
@@ -268,6 +268,7 @@ const HistoricalData = () => {
                 value={filters.startDate}
                 onChange={(e) => handleFilterChange("startDate", e.target.value)}
                 className="filter-input date-input"
+                placeholder="mm/dd/yyyy"
               />
               <span className="date-separator">–</span>
               <input
@@ -276,6 +277,7 @@ const HistoricalData = () => {
                 value={filters.endDate}
                 onChange={(e) => handleFilterChange("endDate", e.target.value)}
                 className="filter-input date-input"
+                placeholder="mm/dd/yyyy"
               />
             </div>
           </div>

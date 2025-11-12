@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "../Database";
-import "../css/Alerts.css"; // keep your existing styles if dashboard CSS is here
+import "../css/Dashboard.css"; // keep your existing styles if dashboard CSS is here
 
 const Dashboard = () => {
   const [metrics, setMetrics] = useState({
@@ -174,15 +174,7 @@ const Dashboard = () => {
           Last updated: {lastUpdated}
         </div>
 
-        <div className="dashboard-grid">
-          <div className="campus-map-section">
-            <h3>🏫 Campus Sensor Map</h3>
-            <div className="map-placeholder">
-              <div className="map-content">
-                <p>Campus sensor map will be rendered here</p>
-              </div>
-            </div>
-          </div>
+        <div className="dashboard-grid-1">
 
           {/* 🔴 Notifications now live from the last 3 readings */}
           <div className="notifications-section">
@@ -208,10 +200,11 @@ const Dashboard = () => {
                   </div>
                 );
               })}
-
-              <button className="view-all-btn">View All →</button>
             </div>
           </div>
+</div>
+
+        <div className="dashboard-grid">
 
           <div className="chart-section">
             <h3>📊 PM2.5 - Last 7 Days</h3>
@@ -221,9 +214,23 @@ const Dashboard = () => {
           </div>
 
           <div className="chart-section">
-            <h3>📊 CO₂ - Last 7 Days</h3>
+            <h3>📊 PM10 - Last 7 Days</h3>
             <div className="chart-placeholder">
-              <p>CO₂ trend chart will be rendered here</p>
+              <p>PM10 trend chart will be rendered here</p>
+            </div>
+          </div>
+
+          <div className="chart-section">
+            <h3>📊 CO - Last 7 Days</h3>
+            <div className="chart-placeholder">
+              <p>CO trend chart will be rendered here</p>
+            </div>
+          </div>
+
+          <div className="chart-section">
+            <h3>📊 NO2 - Last 7 Days</h3>
+            <div className="chart-placeholder">
+              <p>NO2 trend chart will be rendered here</p>
             </div>
           </div>
         </div>
