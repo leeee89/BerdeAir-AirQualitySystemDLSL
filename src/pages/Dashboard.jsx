@@ -1,6 +1,17 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { supabase } from "../Database";
-import "../css/Dashboard.css"; // keep your existing styles if dashboard CSS is here
+import "../css/Dashboard.css";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  Brush,
+} from "recharts";
 
 const Dashboard = () => {
   const [metrics, setMetrics] = useState({
@@ -10,9 +21,11 @@ const Dashboard = () => {
     no2: null,
     timestamp: null,
   });
-  const [recent, setRecent] = useState([]); // 👈 last 3 readings for Notifications
+  const [recent, setRecent] = useState([]); // last 3 readings for Notifications
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [trendRows, setTrendRows] = useState([]); // last 7 days raw rows
+  const [devices, setDevices] = useState([]);     // distinct device_ids seen
 
   const hasLoadedRef = useRef(false);
 
@@ -24,7 +37,6 @@ const Dashboard = () => {
         setLoading(true);
       }
 
-      // Get the latest 3 readings (most recent first)
       const { data, error } = await supabase
         .from("air_quality_readings")
         .select("timestamp, pm25_raw, pm10_raw, co_raw, no2_raw")
@@ -35,7 +47,6 @@ const Dashboard = () => {
 
       const latest = data && data[0] ? data[0] : null;
 
-      // Update metric cards with the newest row
       setMetrics({
         pm25: latest?.pm25_raw ?? null,
         pm10: latest?.pm10_raw ?? null,
@@ -44,7 +55,6 @@ const Dashboard = () => {
         timestamp: latest?.timestamp ?? null,
       });
 
-      // Update notifications with the top 3 rows
       setRecent(data ?? []);
 
       hasLoadedRef.current = true;
@@ -56,11 +66,37 @@ const Dashboard = () => {
     }
   }, []);
 
+  const fetchTrends = useCallback(async () => {
+    try {
+      const sinceISO = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { data, error } = await supabase
+        .from("air_quality_readings")
+        .select("timestamp, device_id, pm25_raw, pm10_raw, co_raw, no2_raw")
+        .gte("timestamp", sinceISO)
+        .order("timestamp", { ascending: true });
+
+      if (error) throw error;
+
+      setTrendRows(data || []);
+      const ids = Array.from(
+        new Set((data || []).map((r) => r.device_id).filter(Boolean))
+      ).sort();
+      setDevices(ids);
+    } catch (e) {
+      console.error("Failed to fetch trend rows:", e.message);
+    }
+  }, []);
+
   useEffect(() => {
-    fetchLatest(); // initial load
-    const id = setInterval(fetchLatest, 10000); // auto-refresh every 10s
+    fetchLatest();
+    fetchTrends();
+
+    const id = setInterval(() => {
+      fetchLatest();
+      fetchTrends();
+    }, 10000);
     return () => clearInterval(id);
-  }, [fetchLatest]);
+  }, [fetchLatest, fetchTrends]);
 
   const fmt = (v, { decimals = 0 } = {}) =>
     v === null || v === undefined ? "—" : Number(v).toFixed(decimals);
@@ -68,38 +104,138 @@ const Dashboard = () => {
   const lastUpdated =
     metrics.timestamp ? new Date(metrics.timestamp).toLocaleString() : "—";
 
-  // Simple rule-of-thumb severities (tweak to your thresholds)
   const classify = (row) => {
-    // prioritize the pollutant with “worst” state for the label
     const flags = [];
 
-    // PM2.5 µg/m³
-    if (row.pm25_raw >= 55.5) flags.push({ key: "PM2.5", level: "danger", value: `${fmt(row.pm25_raw, {decimals:1})} µg/m³` });
-    else if (row.pm25_raw >= 35.5) flags.push({ key: "PM2.5", level: "warning", value: `${fmt(row.pm25_raw, {decimals:1})} µg/m³` });
-    else flags.push({ key: "PM2.5", level: "good", value: `${fmt(row.pm25_raw, {decimals:1})} µg/m³` });
+    if (row.pm25_raw >= 55.5)
+      flags.push({ key: "PM2.5", level: "danger", value: `${fmt(row.pm25_raw, { decimals: 1 })} µg/m³` });
+    else if (row.pm25_raw >= 35.5)
+      flags.push({ key: "PM2.5", level: "warning", value: `${fmt(row.pm25_raw, { decimals: 1 })} µg/m³` });
+    else flags.push({ key: "PM2.5", level: "good", value: `${fmt(row.pm25_raw, { decimals: 1 })} µg/m³` });
 
-    // PM10 µg/m³
-    if (row.pm10_raw >= 155) flags.push({ key: "PM10", level: "danger", value: `${fmt(row.pm10_raw, {decimals:1})} µg/m³` });
-    else if (row.pm10_raw >= 55) flags.push({ key: "PM10", level: "warning", value: `${fmt(row.pm10_raw, {decimals:1})} µg/m³` });
-    else flags.push({ key: "PM10", level: "good", value: `${fmt(row.pm10_raw, {decimals:1})} µg/m³` });
+    if (row.pm10_raw >= 155)
+      flags.push({ key: "PM10", level: "danger", value: `${fmt(row.pm10_raw, { decimals: 1 })} µg/m³` });
+    else if (row.pm10_raw >= 55)
+      flags.push({ key: "PM10", level: "warning", value: `${fmt(row.pm10_raw, { decimals: 1 })} µg/m³` });
+    else flags.push({ key: "PM10", level: "good", value: `${fmt(row.pm10_raw, { decimals: 1 })} µg/m³` });
 
-    // CO ppm (rough illustrative cut-offs)
-    if (row.co_raw >= 1000) flags.push({ key: "CO", level: "danger", value: `${fmt(row.co_raw, {decimals:0})} ppm` });
-    else if (row.co_raw >= 700) flags.push({ key: "CO", level: "warning", value: `${fmt(row.co_raw, {decimals:0})} ppm` });
-    else flags.push({ key: "CO", level: "good", value: `${fmt(row.co_raw, {decimals:0})} ppm` });
+    if (row.co_raw >= 1000)
+      flags.push({ key: "CO", level: "danger", value: `${fmt(row.co_raw, { decimals: 0 })} ppm` });
+    else if (row.co_raw >= 700)
+      flags.push({ key: "CO", level: "warning", value: `${fmt(row.co_raw, { decimals: 0 })} ppm` });
+    else flags.push({ key: "CO", level: "good", value: `${fmt(row.co_raw, { decimals: 0 })} ppm` });
 
-    // NO2 ppb (illustrative cut-offs)
-    if (row.no2_raw >= 200) flags.push({ key: "NO₂", level: "danger", value: `${fmt(row.no2_raw, {decimals:0})} ppb` });
-    else if (row.no2_raw >= 100) flags.push({ key: "NO₂", level: "warning", value: `${fmt(row.no2_raw, {decimals:0})} ppb` });
-    else flags.push({ key: "NO₂", level: "good", value: `${fmt(row.no2_raw, {decimals:0})} ppb` });
+    if (row.no2_raw >= 200)
+      flags.push({ key: "NO₂", level: "danger", value: `${fmt(row.no2_raw, { decimals: 0 })} ppb` });
+    else if (row.no2_raw >= 100)
+      flags.push({ key: "NO₂", level: "warning", value: `${fmt(row.no2_raw, { decimals: 0 })} ppb` });
+    else flags.push({ key: "NO₂", level: "good", value: `${fmt(row.no2_raw, { decimals: 0 })} ppb` });
 
-    // choose worst: danger > warning > good
     const order = { danger: 3, warning: 2, good: 1 };
     const worst = flags.sort((a, b) => order[b.level] - order[a.level])[0];
 
-    return worst; // { key, level, value }
+    return worst;
   };
 
+  // ---- helpers for charting (must be declared before useMemo) ----
+  const bucket5mKey = (iso) => {
+    const d = new Date(iso);
+    const m = d.getMinutes();
+    d.setSeconds(0, 0);
+    d.setMinutes(m - (m % 5));
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    return { key: `${yy}-${mm}-${dd} ${hh}:${mi}`, label: `${mm}/${dd} ${hh}:${mi}` };
+  };
+
+  const palette = [
+    "#4F46E5", "#22C55E", "#F59E0B", "#EF4444", "#06B6D4",
+    "#A855F7", "#10B981", "#E11D48", "#84CC16", "#0EA5E9",
+  ];
+  const colorFor = (i) => palette[i % palette.length];
+
+  const buildPollutantSeries = (rows, devs, pollutantKey) => {
+    const meta = {
+      pm25_raw: { name: "PM2.5", unit: "µg/m³" },
+      pm10_raw: { name: "PM10", unit: "µg/m³" },
+      co_raw: { name: "CO", unit: "ppm" },
+      no2_raw: { name: "NO₂", unit: "ppb" },
+    }[pollutantKey];
+
+    const bucket = new Map();
+    for (const r of rows) {
+      if (!r?.timestamp || !r?.device_id) continue;
+      const v = Number(r[pollutantKey]);
+      if (Number.isNaN(v)) continue;
+
+      const { key, label } = bucket5mKey(r.timestamp);
+      if (!bucket.has(key)) bucket.set(key, { time: label });
+      const b = bucket.get(key);
+      b[r.device_id] = v;
+    }
+
+    const data = Array.from(bucket.entries())
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([, v]) => v);
+
+    return { data, yUnit: meta.unit, name: meta.name };
+  };
+
+  // ---- useMemo hooks MUST be before any early return ----
+  const pm25Series = useMemo(
+    () => buildPollutantSeries(trendRows, devices, "pm25_raw"),
+    [trendRows, devices]
+  );
+  const pm10Series = useMemo(
+    () => buildPollutantSeries(trendRows, devices, "pm10_raw"),
+    [trendRows, devices]
+  );
+  const coSeries = useMemo(
+    () => buildPollutantSeries(trendRows, devices, "co_raw"),
+    [trendRows, devices]
+  );
+  const no2Series = useMemo(
+    () => buildPollutantSeries(trendRows, devices, "no2_raw"),
+    [trendRows, devices]
+  );
+
+  // ---- child component (not a hook, safe anywhere) ----
+  const PollutantTrend = ({ title, series, devices }) => {
+    return (
+      <div className="chart-section">
+        <h3>{title}</h3>
+        <div className="chart-placeholder" style={{ height: 280 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={series.data} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="time" />
+              <YAxis label={{ value: series.yUnit, angle: -90, position: "insideLeft" }} />
+              <Tooltip />
+              <Legend />
+              <Brush dataKey="time" height={20} travellerWidth={8} />
+              {devices.map((dev, idx) => (
+                <Line
+                  key={dev}
+                  type="monotone"
+                  dataKey={dev}
+                  name={dev}
+                  stroke={colorFor(idx)}
+                  strokeWidth={2}
+                  dot={false}
+                  isAnimationActive={false}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  };
+
+  // ---- early return AFTER all hooks ----
   if (loading) {
     return (
       <div className="page-content">
@@ -131,7 +267,7 @@ const Dashboard = () => {
       </div>
 
       <div className="dashboard-content">
-        {/* Metric cards (now live) */}
+        {/* Metric cards */}
         <div className="metrics-cards">
           <div className="metric-card pm25">
             <div className="metric-icon">🌱</div>
@@ -175,14 +311,12 @@ const Dashboard = () => {
         </div>
 
         <div className="dashboard-grid-1">
-
-          {/* 🔴 Notifications now live from the last 3 readings */}
           <div className="notifications-section">
             <h3>⚠️ Notifications</h3>
             <div className="notifications-content">
               {recent.map((row, idx) => {
                 const t = new Date(row.timestamp);
-                const worst = classify(row); // { key, level, value }
+                const worst = classify(row);
                 const dotClass =
                   worst.level === "danger" ? "red" : worst.level === "warning" ? "yellow" : "green";
                 const itemClass =
@@ -192,9 +326,18 @@ const Dashboard = () => {
                   <div key={idx} className={`notification-item ${itemClass}`}>
                     <span className={`notification-dot ${dotClass}`}></span>
                     <div>
-                      <strong>{worst.key} {worst.level === "good" ? "Good" : worst.level === "warning" ? "Elevated" : "Unhealthy"}</strong>
+                      <strong>
+                        {worst.key}{" "}
+                        {worst.level === "good"
+                          ? "Good"
+                          : worst.level === "warning"
+                          ? "Elevated"
+                          : "Unhealthy"}
+                      </strong>
                       <p>
-                        {worst.value} • {t.toLocaleDateString()} {t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {worst.value} •{" "}
+                        {t.toLocaleDateString()}{" "}
+                        {t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       </p>
                     </div>
                   </div>
@@ -202,37 +345,13 @@ const Dashboard = () => {
               })}
             </div>
           </div>
-</div>
+        </div>
 
         <div className="dashboard-grid">
-
-          <div className="chart-section">
-            <h3>📊 PM2.5 - Last 7 Days</h3>
-            <div className="chart-placeholder">
-              <p>PM2.5 trend chart will be rendered here</p>
-            </div>
-          </div>
-
-          <div className="chart-section">
-            <h3>📊 PM10 - Last 7 Days</h3>
-            <div className="chart-placeholder">
-              <p>PM10 trend chart will be rendered here</p>
-            </div>
-          </div>
-
-          <div className="chart-section">
-            <h3>📊 CO - Last 7 Days</h3>
-            <div className="chart-placeholder">
-              <p>CO trend chart will be rendered here</p>
-            </div>
-          </div>
-
-          <div className="chart-section">
-            <h3>📊 NO2 - Last 7 Days</h3>
-            <div className="chart-placeholder">
-              <p>NO2 trend chart will be rendered here</p>
-            </div>
-          </div>
+          <PollutantTrend title="📊 PM2.5 – Last 7 Days" series={pm25Series} devices={devices} />
+          <PollutantTrend title="📊 PM10 – Last 7 Days"  series={pm10Series} devices={devices} />
+          <PollutantTrend title="📊 CO – Last 7 Days"    series={coSeries}   devices={devices} />
+          <PollutantTrend title="📊 NO₂ – Last 7 Days"   series={no2Series}  devices={devices} />
         </div>
       </div>
     </div>
