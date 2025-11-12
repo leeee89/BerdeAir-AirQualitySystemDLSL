@@ -16,9 +16,12 @@ import pandas as pd
 app = FastAPI()
 
 # Load your trained models
-rf_co = joblib.load("rf_co_model.joblib")
-rf_pm25 = joblib.load("rf_pm25_model.joblib")
-rf_pm10 = joblib.load("rf_pm10_model.joblib")
+import os
+BASE_DIR = os.path.dirname(__file__)
+
+rf_co = joblib.load(os.path.join(BASE_DIR, "rf_co_model.joblib"))
+rf_pm25 = joblib.load(os.path.join(BASE_DIR, "rf_pm25_model.joblib"))
+rf_pm10 = joblib.load(os.path.join(BASE_DIR, "rf_pm10_model.joblib"))
 
 class SensorReading(BaseModel):
     co_raw: float
