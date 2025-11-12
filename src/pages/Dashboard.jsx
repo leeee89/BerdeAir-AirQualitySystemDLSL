@@ -26,6 +26,8 @@ const Dashboard = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [trendRows, setTrendRows] = useState([]); // last 7 days raw rows
   const [devices, setDevices] = useState([]);     // distinct device_ids seen
+  const [deviceNameMap, setDeviceNameMap] = useState({});
+
 
   const hasLoadedRef = useRef(false);
 
@@ -66,6 +68,22 @@ const Dashboard = () => {
     }
   }, []);
 
+  const fetchDeviceNames = useCallback(async () => {
+  try {
+    const { data, error } = await supabase
+      .from("Arduino devices")
+      .select("device_id, device_name");
+
+    if (error) throw error;
+
+    const map = {};
+    for (const d of data) map[d.device_id] = d.device_name;
+    setDeviceNameMap(map);
+  } catch (e) {
+    console.error("Failed to fetch device names:", e.message);
+  }
+}, []);
+
   const fetchTrends = useCallback(async () => {
     try {
       const sinceISO = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -88,6 +106,7 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
+      fetchDeviceNames(); // load names once
     fetchLatest();
     fetchTrends();
 
@@ -96,7 +115,7 @@ const Dashboard = () => {
       fetchTrends();
     }, 10000);
     return () => clearInterval(id);
-  }, [fetchLatest, fetchTrends]);
+  }, [fetchDeviceNames,fetchLatest, fetchTrends]);
 
   const fmt = (v, { decimals = 0 } = {}) =>
     v === null || v === undefined ? "—" : Number(v).toFixed(decimals);
@@ -216,18 +235,21 @@ const Dashboard = () => {
               <Tooltip />
               <Legend />
               <Brush dataKey="time" height={20} travellerWidth={8} />
-              {devices.map((dev, idx) => (
-                <Line
-                  key={dev}
-                  type="monotone"
-                  dataKey={dev}
-                  name={dev}
-                  stroke={colorFor(idx)}
-                  strokeWidth={2}
-                  dot={false}
-                  isAnimationActive={false}
-                />
-              ))}
+              {devices.map((dev, idx) => {
+  const name = deviceNameMap[dev] || dev; // fallback to ID if missing
+  return (
+    <Line
+      key={dev}
+      type="monotone"
+      dataKey={dev}
+      name={name} // 👈 legend will show readable name
+      stroke={colorFor(idx)}
+      strokeWidth={2}
+      dot={false}
+      isAnimationActive={false}
+    />
+  );
+})}
             </LineChart>
           </ResponsiveContainer>
         </div>
