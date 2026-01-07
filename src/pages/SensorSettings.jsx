@@ -127,15 +127,7 @@ const SensorSettings = () => {
     setFilteredSensors(visibleSensors);
   }, [visibleSensors]);
 
-  const handleEdit = (sensorId) => {
-    alert(
-      `Edit sensor ${sensorId}\n\nTip: Implement a dialog to update 'device_name' or 'location' via Supabase .update().`
-    );
-  };
-
-  const handleAddSensor = () => {
-    alert('Add new sensor — show a form to insert into "Arduino devices" via .insert({ device_id, device_name, location })');
-  };
+  
 
   const sortOptions = ['Name (A-Z)', 'Name (Z-A)', 'Status', 'Location'];
 
@@ -188,9 +180,7 @@ const SensorSettings = () => {
           </div>
         </div>
 
-        <button className="add-sensor-btn" onClick={handleAddSensor}>
-          ➕ Add Sensor
-        </button>
+       
       </div>
 
       {/* Sensors Grid */}
@@ -207,13 +197,7 @@ const SensorSettings = () => {
                     <p className="sensor-location">📍 {sensor.location}</p>
                   </div>
                 </div>
-                <button
-                  className="edit-btn"
-                  onClick={() => handleEdit(sensor.id)}
-                  title="Edit Sensor"
-                >
-                  ✏️ Edit
-                </button>
+            
               </div>
 
               {/* Computed status (last 10 mins), no toggle */}
